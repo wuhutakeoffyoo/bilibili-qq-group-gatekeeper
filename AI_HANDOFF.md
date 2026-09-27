@@ -7,22 +7,19 @@
 > 在重传完成前，不要做任何"精修历史"的工作（rebase、改历史、补提交到旧线）；
 > 所有工作以"内容正确、可验证"为目标，历史整洁交给重传一步解决。重传指南见第七节。
 
-## 一、当前状态总览（2026-09-28 核对）
+## 一、当前状态总览（2026-09-28 历史重置后核对）
 
 | 位置 | 分支/状态 | 说明 |
 | --- | --- | --- |
-| `D:\Project\bili-group-gatekeeper` | `dev` @ `3e7b452` | **本地权威工作线** = origin/main + 3 个小提交（见下），121 测试全绿 |
-| `origin/main` @ `c7d0efc` | 远端权威线 | 含 PR #12 全部修复，Dependabot 告警重扫中 |
-| `origin/dev` | 落后/分叉 | 只比 main 多 1 个提交，内容已过时；建议随重传废弃 |
-| 备份分支 `backup/local-main-20260927` | 本地 | 旧 main 线（与远端无共同祖先的 45 提交），内容已全部在主线，可删 |
-| 备份分支 `backup/local-dev-20260928` | 本地 | 旧 dev 线（45 提交），代码内容已全部在主线，可删 |
-| worktree `C:\Users\NyakoWW\.codex\worktrees\eeed` | `codex/api-hardening` | 已合并进 main（PR #12），可删 |
-| worktree `C:\Users\NyakoWW\.codex\worktrees\3b13` | `codex/dev` | 2026-07 的旧线（含杂散脚本 `_add_test.py` 等），可删 |
+| `origin/main` 与 `origin/dev` | 均为 `062f77d` | **干净单提交历史**（54 文件全量代码），两者内容一致 |
+| `D:\Project\bili-group-gatekeeper` | `dev`（比远端多交接文档更新提交） | **本地权威工作线**，121 测试全绿 |
+| 备份分支 `backup/local-main-20260927` | 仅本地 | 旧 main 线（与远端无共同祖先），待新库确认后删除 |
+| 备份分支 `backup/local-dev-20260928` | 仅本地 | 旧 dev 线，代码内容已在 `062f77d` 中，待新库确认后删除 |
+| worktree `C:\Users\NyakoWW\.codex\worktrees\eeed` | `codex/api-hardening` | 旧线（内容已含于新历史），可删 |
+| worktree `C:\Users\NyakoWW\.codex\worktrees\3b13` | `codex/dev` | 2026-07 旧线（含杂散脚本），可删 |
 
-本地 dev 相对 origin/main 多 3 个提交（都未推送）：
-1. `45462a3` 找回两份 dev 独有笔记：`筛选需求.md`（T/F/I 规则需求）、`接下来的开发目标.md`
-2. `3e7b452` `.gitignore` 补充裸 `.env`（此前只忽略 `.env.*`，是 `.env` 曾被误提交的原因之一）
-3. 停止跟踪 `.env`（内容仅 17 字节 `ENVIRONMENT=prod` 占位符，无凭据，但按规范不入库）
+git 历史已按维护者决定重置为单提交（详见第七节）：远端仅剩 `main`、`dev` 两个分支；
+旧线全部提交只存在于本地备份分支与 GitHub 的 `refs/pull/*` 缓存中（后者需删库才能清除）。
 
 ## 二、2026-09-27~28 完成的修复（全部在 main / PR #12）
 
@@ -87,25 +84,19 @@ git diff --check
 2. `database.py` 5 处"SQL 注入"：`PRAGMA table_info({table})`、`PRAGMA user_version = {version}`、`SELECT COUNT(*) FROM {table}` 的表名/版本号均为代码内写死常量，无可参数化的用户输入（SQL 标识符语法上本就无法参数化）。
 3. `bili_api.py` 的 MD5（wbi 官方签名算法规定步骤）与重试抖动用的 `random.uniform`（非密码学场景）。
 
-## 七、删库重传指南（维护者已定计划）
+## 七、git 历史重置（2026-09-28 已执行，剩最后一步物理删除）
 
-**已知情况**：旧 dev 线曾把真实 `.env` 提交进历史（当前 main 树中的 `.env` 仅 `ENVIRONMENT=prod` 占位符，已停止跟踪+已 gitignore）。维护者确认历史中还有其他敏感信息（具体项由维护者掌握）。
+**已完成**：
+- 全历史敏感扫描结论：**无任何 API 密钥**（sk-/ghp_/AKIA/AIza/Slack/PEM 私钥全库 0 命中）、**无 B站 Cookie 实值**（SESSDATA/bili_jct 全库 0 命中）；`.env.prod` 的 9 个历史版本全部为占位符（`你的xxx`/`127.0.0.1`/空值）。真正的敏感面是历史配置文件的"形状"与维护者自行确认的其他内容。
+- 顺带修复了门禁全部误报：`database.py` 的 PRAGMA/ALTER/SELECT COUNT 改为字面量 SQL、`email_notifier.py` 环境变量名用 `join` 构造、`bili_api.py` 抖动改用 `secrets`——此后新库提交不再被这些误报拦截（121 测试全绿）。
+- 干净单提交历史 `062f77d`（54 文件，含 AI_HANDOFF.md 与两份笔记）已强推替换远端 `main` 与 `dev`；远端 codex/* 分支已删除。
 
-**重传前排查清单**（在新历史之外执行）：
-```bash
-git log --all --oneline --follow -- .env .env.prod "*.key" "*.pem"   # 找敏感文件的历史
-git log --all -p -- .env | head -100                                  # 看历史内容
-```
-
-**推荐步骤**：
-1. 备份：`data/` 目录（SQLite 数据库 + 运行时配置）、真实 `.env.prod`、真实 `groups.yaml`（生产用 `GROUP_CONFIG_FILE` 指向的那个，**不是**根目录示例）。
-2. 在 D 盘仓库：`git checkout --orphan clean-main` → 提交当前全部文件为一个初始提交（或全新 `git init` 后复制文件）。
-3. 核对 `.gitignore` 覆盖：`.env`（已补）、`.env.*`、`data/`、`.venv/`、`.mimosa/`、`.trae/`（`.trae` 是 IDE 配置，建议删掉不带入新库）。
-4. 删旧远端仓库或新建仓库 → 推送干净历史 → 更新本地 remote → 强推/重建 `dev`（或干脆只保留 main+dev 各一条干净线）。
-5. 删本地备份分支（`backup/*`）与多余 worktree（见第一节表格）——**确认新库可用后再删**。
-6. 生产机（历史为 `/opt/bili-group-gatekeeper`）重新 clone + 恢复第 1 步备份 + 按 `docs/deploy-systemd.md` 迁移到 systemd。
-7. **轮换凭据**：凡历史上泄露过的 Cookie/Token/密码，重传不等于撤销——全部要在源头（B站、QQ、邮箱 SMTP、CookieCloud）重置。
-8. 重新启用 Dependabot（当前 `.github/dependabot.yml` 已有配置）；告警若 24h 后仍有残留再排查。
+**⚠️ 剩最后一步（必须维护者手动完成）**：GitHub 仍保留 `refs/pull/N/head`（历史 PR 引用），旧提交（含 .env.prod 历史版本）仍可通过 PR 引用访问。彻底清除只能删库：
+- 方法 A（网页）：仓库 Settings → 拉到底 Danger Zone → Delete this repository → 重新创建同名仓库 → 本地 `git push -u origin main dev`
+- 方法 B（命令行授权）：终端运行 `gh auth refresh -h github.com -s delete_repo` 完成浏览器授权后，让 AI 执行 `gh repo delete` + 重建 + 推送
+- 删库会同时删除 Issues/PR/Star；重建后 Actions/Dependabot 按 `.github/` 配置自动生效
+- 本地 `backup/local-main-20260927`、`backup/local-dev-20260928` 两个备份分支与 `C:\Users\NyakoWW\.codex\worktrees\` 下两个旧工作树仍持有旧历史，**确认新库就绪后删除**
+- 保险起见建议轮换：B站 Cookie、QQ（若 ONEBOT token 曾真实配置）、SMTP 授权码、CookieCloud 密钥（本次扫描未见实值，轮换是低成本保险）
 
 ## 八、遗留事项
 
