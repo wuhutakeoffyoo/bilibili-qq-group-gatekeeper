@@ -1,0 +1,42 @@
+# 审核状态：true=T（通过条件），false=F（不通过条件），unknown=I（忽略条件）。
+# all_pass：任意 F 则分组为 F；无 F 但存在 I 则为 I；全部 T 才为 T。
+# any_pass：任意 T 则分组为 T；无 T 但存在 I 则为 I；全部 F 才为 F。
+version: 2
+entry: reject_group_a
+
+groups:
+  # 筛选组 A：任意 F 拒绝；全 T 通过；无 F 且存在 I 时进入组 B。
+  - id: reject_group_a
+    name: 筛选组A（拒绝组）
+    mode: all_pass
+    conditions:
+      - no_leave_record
+      - bili_account
+      - bili_level
+      - follow
+      - qq_level
+    on_true:
+      flow: approve
+      reason: 筛选组A全部条件通过
+    on_false:
+      flow: reject
+    on_unknown:
+      flow: next
+      goto: approve_group_b
+      reason: 筛选组A存在忽略项且无拒绝项，进入筛选组B
+
+  # 筛选组 B：有目标主播粉丝牌即通过，否则忽略，交由人工处理。
+  - id: approve_group_b
+    name: 筛选组B（通过组）
+    mode: any_pass
+    conditions:
+      - medal
+    on_true:
+      flow: approve
+      reason: 持有目标主播粉丝灯牌
+    on_false:
+      flow: ignore
+      reason: 未持有目标主播粉丝灯牌
+    on_unknown:
+      flow: ignore
+      reason: 无法检索目标主播粉丝灯牌

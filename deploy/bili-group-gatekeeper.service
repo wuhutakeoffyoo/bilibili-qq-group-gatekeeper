@@ -1,0 +1,28 @@
+[Unit]
+Description=Bili Group Gatekeeper (NoneBot2 QQ 加群审核)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+# 以下三行按实际部署环境修改：运行用户、部署目录、虚拟环境里的 Python
+User=gatekeeper
+WorkingDirectory=/opt/bili-group-gatekeeper
+ExecStart=/opt/bili-group-gatekeeper/.venv/bin/python bot.py
+
+# 进程异常退出后自动拉起，替代手工 setsid 启动
+Restart=on-failure
+RestartSec=5
+
+# NoneBot 收到 SIGINT 会优雅断开 OneBot 连接后再退出
+KillSignal=SIGINT
+TimeoutStopSec=30
+
+Environment=PYTHONIOENCODING=utf-8
+# 日志交给 journald 查看：journalctl -u bili-group-gatekeeper -f
+# 注意：bot.py 本地按天写入的日志文件不受影响，仍在部署目录内
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

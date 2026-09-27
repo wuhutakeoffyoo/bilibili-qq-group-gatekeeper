@@ -1,0 +1,23 @@
+name: 功能建议
+description: 建议新的能力或体验改进
+title: "[Feature]: "
+labels: [needs-triage]
+body:
+  - type: textarea
+    id: scenario
+    attributes:
+      label: 使用场景
+      description: 你遇到了什么问题，谁会从中受益？
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: 建议方案
+      description: 希望项目怎样处理？可以同时列出替代方案。
+    validations:
+      required: true
+  - type: textarea
+    id: additional
+    attributes:
+      label: 补充信息

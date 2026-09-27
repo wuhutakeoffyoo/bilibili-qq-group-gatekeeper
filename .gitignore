@@ -1,0 +1,33 @@
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+venv/
+data/config/*.json
+data/config/*.yaml
+data/leave_records/*.json
+data/runtime/*.json
+data/records/*.json
+data/records/leave_records/*.json
+data/records/*.sqlite3*
+data/*.png
+*.log
+.DS_Store
+
+# 禁止提交环境敏感配置文件；仅允许公开模板
+.env.*
+!.env.prod.example
+
+# 本地运行和临时预览输出
+*.out
+*.err
+test-page.html
+
+# 内部参考文档
+审核逻辑说明.md
+审核逻辑重构方案设计.md
+
+
+.env
+.mimosa/
+.v2c/
