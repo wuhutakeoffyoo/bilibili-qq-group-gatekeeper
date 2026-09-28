@@ -1,11 +1,11 @@
-# Bili Group Gatekeeper
+# Bilibili QQ Group Gatekeeper
 
 基于 NoneBot2、OneBot v11 和 NapCat 的 QQ 群申请管理机器人。
 
-[![CI](https://github.com/wuhutakeoffyoo/bili-group-gatekeeper/actions/workflows/ci.yml/badge.svg)](https://github.com/wuhutakeoffyoo/bili-group-gatekeeper/actions/workflows/ci.yml)
+[![CI](https://github.com/wuhutakeoffyoo/bilibili-qq-group-gatekeeper/actions/workflows/ci.yml/badge.svg)](https://github.com/wuhutakeoffyoo/bilibili-qq-group-gatekeeper/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
-项目仍处于早期阶段，升级前请备份本地 `data/` 和 `.env.prod`。欢迎通过 [Issue](https://github.com/wuhutakeoffyoo/bili-group-gatekeeper/issues) 报告问题，或阅读 [贡献指南](CONTRIBUTING.md) 参与开发。
+项目仍处于早期阶段，升级前请备份本地 `data/` 和 `.env.prod`。欢迎通过 [Issue](https://github.com/wuhutakeoffyoo/bilibili-qq-group-gatekeeper/issues) 报告问题，或阅读 [贡献指南](CONTRIBUTING.md) 参与开发。
 
 ## 功能
 
@@ -52,12 +52,13 @@
 ## 目录结构
 
 ```text
-bili-group-gatekeeper/
+bilibili-qq-group-gatekeeper/
 ├── bot.py
 ├── pyproject.toml
 ├── start.sh
 ├── start.ps1
-├── .env                  ← 仅声明当前环境名，无敏感信息，可提交
+├── .env.example          ← 环境选择模板，可提交
+├── .env                  ← 本地环境选择文件，禁止提交
 ├── .env.prod             ← 生产环境真实配置，禁止提交（已被 .gitignore 忽略）
 ├── .env.prod.example     ← 生产环境配置模板，无敏感信息，可提交
 ├── data/
@@ -97,25 +98,13 @@ curl -LsSf https://astral.sh/uv/install.sh | sh
 source "$HOME/.local/bin/env"
 ```
 
-**国内用户建议配置 PyPI 镜像源**，否则 `uv sync` 可能下载很慢甚至超时。常用镜像：
-
-| 镜像      | 配置命令                                                                          |
-| ------- | ----------------------------------------------------------------------------- |
-| 清华 tuna | `uv pip config set --user index-url https://pypi.tuna.tsinghua.edu.cn/simple` |
-| 阿里云     | `uv pip config set --user index-url https://mirrors.aliyun.com/pypi/simple/`  |
-| 中科大     | `uv pip config set --user index-url https://pypi.mirrors.ustc.edu.cn/simple/` |
-
-也可以手动写入 uv 配置文件 `~/.config/uv/uv.toml`：
-
-```toml
-[pip]
-index-url = "https://pypi.tuna.tsinghua.edu.cn/simple"
-```
+下载较慢时，可参考 [uv 官方索引配置文档](https://docs.astral.sh/uv/configuration/indexes/) 为本机设置镜像。不要使用 `uv pip config set`：`uv` 没有这个子命令；配置前也请确认镜像能提供锁文件要求的包。
 
 ### 2. 安装依赖
 
 ```bash
-cd bili-group-gatekeeper
+git clone https://github.com/wuhutakeoffyoo/bilibili-qq-group-gatekeeper.git
+cd bilibili-qq-group-gatekeeper
 uv sync --locked
 ```
 
@@ -125,19 +114,24 @@ uv sync --locked
 
 | 文件                  | 是否提交 Git | 作用                                    |
 | ------------------- | :------: | ------------------------------------- |
-| `.env`              |     是    | 仅声明当前使用哪个环境（`ENVIRONMENT=prod`），无敏感信息 |
+| `.env.example`      |     是    | 环境选择模板（`ENVIRONMENT=prod`） |
+| `.env`              |   **否**  | 从模板复制的本地环境选择文件，可按部署需要修改 |
 | `.env.prod`         |   **否**  | 生产环境真实配置，存放所有敏感信息（Token、QQ号、Cookie 等） |
 | `.env.prod.example` |     是    | 配置模板文件，只保留键名和示例值，供协作者参考需要填写哪些字段       |
 
 <br />
 
-**初次部署只需要两步：**
+**手动部署时，先从模板生成本地配置：**
 
 ```bash
-# 1. 从模板生成真实配置文件
-cp .env.prod.example .env.prod
+# 1. 选择 prod 环境，使 NoneBot 读取 .env.prod
+cp .env.example .env
 
-# 2. 编辑 .env.prod，把所有占位值替换为你的真实信息
+# 2. 从模板生成真实配置文件
+cp .env.prod.example .env.prod
+chmod 600 .env.prod
+
+# 3. 编辑 .env.prod，把所有占位值替换为你的真实信息
 nano .env.prod
 ```
 
@@ -199,19 +193,20 @@ chmod +x start.sh
 ./start.sh
 ```
 
-首次运行会自动安装 `uv`、创建 `.env.prod` 并询问必填项。自动化部署可跳过问答：
+首次运行会自动安装 `uv`、从模板创建本地 `.env` 和 `.env.prod`，并询问必填项。自动化部署可跳过问答：
 
 ```bash
 ./start.sh --quick
 ```
 
-也可以手动启动：
+也可以手动启动（先按上文创建本地配置）：
 
 ```bash
 uv run python bot.py
 ```
 
 生产环境建议使用 systemd 托管（崩溃自动拉起、开机自启），见 [docs/deploy-systemd.md](docs/deploy-systemd.md)。
+为兼容已有部署，systemd 单元名暂时仍是 `bili-group-gatekeeper.service`，无需因仓库改名而新建第二个服务。
 
 ## Windows 部署
 
@@ -235,17 +230,16 @@ Set-ExecutionPolicy -Scope CurrentUser -ExecutionPolicy RemoteSigned
 
 `start.ps1` 会通过 `uv` 自动完成：创建虚拟环境 → 安装依赖 → 启动机器人。
 
-首次运行还会自动安装 `uv`、创建 `.env.prod` 并询问必填项。无需问答时可使用：
+首次运行还会自动安装 `uv`、从模板创建本地 `.env` 和 `.env.prod`，并询问必填项。无需问答时可使用：
 
 ```powershell
 .\start.ps1 -Quick
 ```
 
-也可以手动启动：
+也可以手动启动（先创建本地 `.env` 和 `.env.prod`）：
 
 ```powershell
-.\venv\Scripts\Activate.ps1
-python bot.py
+uv run --locked python bot.py
 ```
 
 ## 命令
@@ -299,11 +293,12 @@ python bot.py
 GROUP_CONFIG_FILE=groups.yaml
 ```
 
-推荐将群基础配置写到独立 `groups.yaml`，把审核流转写到 `review_pipeline.yaml`。\
-项目根目录提供了两个可直接使用的示例文件（不含敏感信息，可提交至 Git）：
+推荐将群基础配置和审核流转分别写到独立 YAML。仓库提供无敏感信息的示例：
 
 - `groups.yaml`
 - `review_pipeline.yaml`
+
+实际部署时建议复制为被 Git 忽略的 `groups.local.yaml` 和 `review_pipeline.local.yaml`，在前者中设置 `review_pipeline_file: review_pipeline.local.yaml`，并在 `.env.prod` 中设置 `GROUP_CONFIG_FILE=groups.local.yaml`。真实群号、目标 UID 和个性化拒绝理由可能暴露运营信息，不要直接修改并提交示例文件。
 
 `groups.yaml` 示例：
 
@@ -426,7 +421,7 @@ GROUP_2_REVIEW_PIPELINE_FILE=review_pipeline_group2.yaml
 - 如果开启 QQ 等级校验但接口没有返回等级字段、返回无效值，或明确标记 `isHideQQLevel`，机器人会按无法判断处理并继续执行后续校验；未隐藏时返回的 `0` 才视为有效 0 级，并按最低等级门槛正常判断
 - QQ 等级获取：优先通过 `get_stranger_info` 接口读取；若用户设置了等级不可见导致接口无返回，还会尝试从加群请求事件中提取
 - `review_pipeline_file` 若写在 `groups.yaml` 里，相对路径会按该 `groups.yaml` 所在目录解析
-- YAML 文件不含敏感信息，可直接提交至 Git
+- 仓库自带的 YAML 仅是占位示例；实际部署配置请使用 `*.local.yaml` 或其他已忽略的路径
 
 ### YAML 配置字段详解
 
@@ -511,7 +506,7 @@ WEBUI_LOGIN_MAX_ATTEMPTS=5
 WEBUI_LOGIN_WINDOW_SECONDS=900
 ```
 
-通过 HTTPS 域名访问 WebUI，在登录页输入 `WEBUI_TOKEN`。不要把 Token 放在 URL 中；查询参数 Token 已不再支持。界面支持 YAML 编辑、分组表单、新增、删除、拖拽排序和流程预览；保存前会校验分组、条件、模式和跳转目标，再原子替换 `review_pipeline.yaml`。
+通过 HTTPS 域名访问 WebUI，在登录页输入 `WEBUI_TOKEN`。不要把 Token 放在 URL 中；查询参数 Token 已不再支持。界面支持 YAML 编辑、分组表单、新增、删除、拖拽排序和流程预览；保存前会校验分组、条件、模式和跳转目标，再原子替换 `review_pipeline.yaml`。保存成功后，使用该文件的群会立即对新收到的申请采用更新后的流程；已开始处理的申请按其已读取的流程继续。
 
 ### 公网安全部署
 
@@ -621,39 +616,3 @@ B站检查复用 HTTP 连接，最多同时执行 4 个完整检查，每个检�
 ## 许可证
 
 本项目采用 [MIT License](LICENSE)。你可以使用、修改和分发本项目，但需要保留版权和许可证声明。
-
-## systemd 部署
-
-创建服务文件：
-
-```bash
-sudo nano /etc/systemd/system/qqgroup-request-manager.service
-```
-
-写入以下内容，并替换路径和用户：
-
-```ini
-[Unit]
-Description=Bili Group Gatekeeper Bot
-After=network.target
-
-[Service]
-Type=simple
-User=your_user
-WorkingDirectory=/path/to/bili-group-gatekeeper
-ExecStart=/path/to/bili-group-gatekeeper/venv/bin/python /path/to/bili-group-gatekeeper/bot.py
-Restart=always
-RestartSec=10
-
-[Install]
-WantedBy=multi-user.target
-```
-
-启用服务：
-
-```bash
-sudo systemctl daemon-reload
-sudo systemctl enable qqgroup-request-manager
-sudo systemctl start qqgroup-request-manager
-sudo systemctl status qqgroup-request-manager
-```

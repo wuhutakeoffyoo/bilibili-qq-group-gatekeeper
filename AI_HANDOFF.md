@@ -1,26 +1,25 @@
-# Bili Group Gatekeeper 交接文档（2026-09-28 版）
+# Bilibili QQ Group Gatekeeper 交接文档（2026-09-28 版）
 
 本文档取代旧版 `AI_HANDOFF.md`（旧版随旧 git 历史一并清除）。
 读者对象：接手的 AI。维护者是编程新手，解释请用简单中文，优先说明实际影响、修改效果与验证结果。
 
 > ✅ **git 历史重置已完成（2026-09-28）**：因旧历史含部署配置文件形状与维护者认定的敏感内容，
 > 已删除旧 GitHub 仓库并以单提交干净历史重建（敏感扫描结论：全库无 API 密钥、无 Cookie 实值）。
-> 本地旧历史（备份分支/stash/reflog）也已物理清除。当前仓库 = 远端与本地完全一致的两条分支。
+> 本地旧历史（备份分支/stash/reflog）也已物理清除。下方分支状态是复审时快照，接手时先用 git status 和 git log 实查。
 > **维护者仍建议轮换一次 B站 Cookie / SMTP 授权码 / CookieCloud 密钥作为保险**。
 
-## 一、当前状态总览（2026-09-28 历史重置后核对）
+## 一、当前状态总览（2026-09-28 复审时快照）
 
 | 位置 | 分支/状态 | 说明 |
 | --- | --- | --- |
-| `origin/main` | `062f77d` | 干净单提交历史（54 文件全量代码），默认分支 |
-| `origin/dev` | `5d253cd` | main + 交接文档更新，与本地 dev 一致 |
-| `D:\Project\bili-group-gatekeeper` | `dev` | **本地权威工作线**，121 测试全绿，与远端同步 |
+| `origin/main` / `origin/dev` | `d10862c` | 同一干净历史；比初始提交多两次交接文档更新 |
+| `D:\Project\bili-group-gatekeeper` | `codex/audit-fixes` | 基于 `origin/main` 的本地修复分支；完整测试、Ruff 与编译已通过，待交付 |
 | `D:\Project\bili-group-gatekeeper-worktree-backup\` | 目录（非 git） | 两个已删除旧工作树中的杂散文件备份（含 `_fix_partname.py`——属另一个项目 autogetprice 的补丁脚本，误放在旧工作树中） |
 
-git 历史已重置：全库仅 2 个提交（`062f77d` 初始 + `5d253cd` 文档），旧线的备份分支、stash、
+git 历史以 `062f77d` 为干净新根，之后可继续正常提交。旧线的备份分支、stash、
 reflog 已全部物理清除（`gc --prune=now`），旧工作树 `eeed`/`3b13` 已删除。
 
-## 二、2026-09-27~28 完成的修复（全部在 main / PR #12）
+## 二、2026-09-27~28 完成的修复（旧仓库 PR #12 的内容已纳入干净历史）
 
 ### B站搜索加固（`bili_api.py`）
 - 搜索接口迁移到 `/x/web-interface/wbi/search/type` 并按官方算法签名：`nav` 接口取密钥（伪装 png URL 取文件名）、进程内缓存 6 小时、双检锁；**密钥获取失败自动回退未签名旧路径**，可用性不降级。
@@ -56,7 +55,7 @@ reflog 已全部物理清除（`gc --prune=now`），旧工作树 `eeed`/`3b13` 
 
 ```bash
 uv sync --locked
-uv run --locked python -m unittest discover -s tests   # 121 项，应全过
+uv run --locked python -m unittest discover -s tests   # 应全过
 uv run --locked python -m compileall -q bot.py src tests
 uv run ruff check .
 git diff --check
@@ -79,9 +78,9 @@ git diff --check
 
 ## 六、已证实的扫描器误报（勿再排查，可反馈 Mimosa 维护者）
 
-1. `config.py` 的 `"log_archive_password": "LOG_ARCHIVE_PASSWORD"` → CWE-798"硬编码凭据"误报：这是字段名→**环境变量名**的映射（从环境变量读密码的代码），值不是密码。
+1. 旧代码中 `"log_archive_password": "LOG_ARCHIVE_PASSWORD"` 被报为 CWE-798：这是字段名→**环境变量名**的映射，值不是密码；当前代码已没有该字段。
 2. `database.py` 5 处"SQL 注入"：`PRAGMA table_info({table})`、`PRAGMA user_version = {version}`、`SELECT COUNT(*) FROM {table}` 的表名/版本号均为代码内写死常量，无可参数化的用户输入（SQL 标识符语法上本就无法参数化）。
-3. `bili_api.py` 的 MD5（wbi 官方签名算法规定步骤）与重试抖动用的 `random.uniform`（非密码学场景）。
+3. `bili_api.py` 的 MD5 是 Wbi 签名算法规定步骤；当前重试抖动使用 `secrets.randbelow`，旧版 `random.uniform` 告警已不适用。
 
 ## 七、git 历史重置（2026-09-28 已全部完成）
 
@@ -97,8 +96,8 @@ git diff --check
 
 ## 八、遗留事项
 
-- Dependabot 告警合并后 7→5（重扫异步中），预期全部自动清除；若 24h 后仍在，查 https://github.com/wuhutakeoffyoo/bili-group-gatekeeper/security/dependabot
-- 本地 dev 的 3 个提交未推送（与 origin/dev 分叉，非快进）——按第七节随重传处理，不要强行推旧线
+- Dependabot 告警数量是旧快照；需要当前结论时到 https://github.com/wuhutakeoffyoo/bilibili-qq-group-gatekeeper/security/dependabot 实查
+- 本次复审修复分支尚未合入主线；交付时以现场 Git 状态和测试结果为准
 - `main.py` 约 2300 行、主测试文件偏大：可逐步拆分，但**先补测试再动行为**
 - NapCat"假在线"（进程在但收不到消息）systemd 管不了，需保持实际消息验证习惯（详见 `docs/deploy-systemd.md` 末节）
 - 同机另有 Docker `napcat` 与 `dynamic-bot`（Hoshimi-Cat-Bot）两个独立组件；`dynamic-bot` 的链接解析已按需关掉，勿在审核 Bot 上找原因
@@ -106,5 +105,22 @@ git diff --check
 ## 九、给下一个 AI 的开场建议
 
 1. 先跑第四节验证命令确认基线，再 `git status --short --branch`、`git log -5 --oneline` 核对状态。
-2. 若维护者尚未执行删库重传：优先协助第七节流程，其他改动等重传后再做。
+2. 历史重置已完成；不要再按旧版交接文档执行删库重传。
 3. 修任何问题前先读第三节固定规则；行为修改必须补对应测试。
+
+## 十、2026-09-28 复审修复（本地分支）
+
+- B站身份或绑定查询未确认时，`no_conflict` / `no_identity_change` 判 I。
+- WebUI 以群配置实际解析出的 YAML 路径为准；保存后更新运行中的群规则，重启时也从 YAML 重建阶段列表。
+- 粉丝牌条目字段缺失或解析失败时保留 I；已有明确达标粉丝牌仍可判 T。
+- 运行时 Cookie 状态文件使用私有权限；systemd 服务设置 `UMask=0077`，部署文档补充已有文件权限处理。
+- 对应回归测试在 `tests/test_audit_regressions.py`；本地完整测试、Ruff 和编译已通过。接手时仍需重新运行第四节命令。
+
+## 十一、2026-09-28 开源整理（当前分支）
+
+- GitHub 仓库实查已是 `PUBLIC`；根目录 `LICENSE` 为 MIT，GitHub 许可证接口识别为 `MIT`。不要重复添加另一份许可证。
+- 新增公开 `.env.example`；真实 `.env`、`.env.prod` 仍忽略。启动脚本会在缺失时从模板生成，Linux 脚本采用私有 umask。
+- `*.local.yaml` 现已忽略，真实群号、目标 UID 和个性化理由应放在本地副本，仓库 YAML 保持占位示例。
+- README 已移除过期的第二套 systemd 步骤和不可用的 `uv pip config set` 命令。当前公开部署说明以 `docs/deploy-systemd.md` 为准。
+- 维护者已确认新英文名 **Bilibili QQ Group Gatekeeper**，仓库 slug 为 `bilibili-qq-group-gatekeeper`。本地元数据和文档已改；生产 systemd 单元名与现有 `/opt` 路径保留兼容，禁止同时运行两个审核实例。远端状态应在交付时重新核查。
+- GitHub Dependabot alerts API 当前返回禁用/权限不足，公开发布公告前应到仓库设置中核实并启用安全告警与私密漏洞报告。

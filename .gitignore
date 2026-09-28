@@ -17,6 +17,7 @@ data/*.png
 # 禁止提交环境敏感配置文件；仅允许公开模板
 .env.*
 !.env.prod.example
+!.env.example
 
 # 本地运行和临时预览输出
 *.out
@@ -29,5 +30,6 @@ test-page.html
 
 
 .env
+*.local.yaml
 .mimosa/
 .v2c/

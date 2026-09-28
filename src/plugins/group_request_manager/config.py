@@ -17,6 +17,7 @@
 import json
 import logging
 import os
+import tempfile
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Optional
@@ -526,10 +527,10 @@ def _apply_mapping_group_fields(
 
     review_pipeline_file = raw_config.get("review_pipeline_file")
     if review_pipeline_file not in ("", None):
-        group_config.review_pipeline_file = str(review_pipeline_file).strip()
+        resolved_pipeline_file = resolve_config_path(review_pipeline_file, base_dir).resolve()
+        group_config.review_pipeline_file = str(resolved_pipeline_file)
         group_config.review_stages = load_review_stages_from_yaml_file(
-            review_pipeline_file,
-            base_dir=base_dir,
+            resolved_pipeline_file,
         )
 
 
@@ -613,6 +614,16 @@ class ConfigManager:
     """单例配置管理器，负责 JSON 文件读写及环境变量合并。"""
     _config: Optional[PluginConfig] = None
 
+    @staticmethod
+    def _restrict_state_permissions(path: Path) -> None:
+        """Keep a persisted Bilibili Cookie readable only by the service account."""
+        try:
+            path.chmod(0o600)
+        except OSError:
+            if os.name == "posix":
+                raise
+            logger.warning("无法限制运行时配置文件权限：%s", path, exc_info=True)
+
     # ---- 兼容旧版 GROUP_CONFIGS JSON 环境变量 ----
 
     @classmethod
@@ -648,6 +659,16 @@ class ConfigManager:
 
         for group_config in load_group_configs_from_yaml_file(group_config_file):
             file_config.groups[group_config.group_id] = group_config
+
+    @classmethod
+    def _refresh_review_stages(cls, file_config: PluginConfig) -> None:
+        """Use each group's YAML as the source of truth after config merges."""
+        for group in file_config.groups.values():
+            if not group.review_pipeline_file.strip():
+                continue
+            pipeline_file = resolve_config_path(group.review_pipeline_file).resolve()
+            group.review_pipeline_file = str(pipeline_file)
+            group.review_stages = load_review_stages_from_yaml_file(pipeline_file)
 
     @classmethod
     def _merge_runtime_group_overrides(cls, file_config: PluginConfig) -> None:
@@ -783,9 +804,10 @@ class ConfigManager:
 
         review_pipeline_file = get_env(f"{prefix}REVIEW_PIPELINE_FILE")
         if review_pipeline_file:
-            group_config.review_pipeline_file = str(review_pipeline_file).strip()
+            resolved_pipeline_file = resolve_config_path(review_pipeline_file).resolve()
+            group_config.review_pipeline_file = str(resolved_pipeline_file)
             group_config.review_stages = load_review_stages_from_yaml_file(
-                review_pipeline_file
+                resolved_pipeline_file
             )
 
     @classmethod
@@ -910,6 +932,7 @@ class ConfigManager:
 
         # 优先从新的运行时状态文件读取；若不存在则兼容旧路径
         if CONFIG_FILE.exists():
+            cls._restrict_state_permissions(CONFIG_FILE)
             try:
                 file_config = cls._load_runtime_config_file(CONFIG_FILE)
             except Exception:
@@ -924,6 +947,7 @@ class ConfigManager:
                     logger.exception("备份损坏的运行时配置文件失败")
                 file_config = PluginConfig()
         elif LEGACY_CONFIG_FILE.exists():
+            cls._restrict_state_permissions(LEGACY_CONFIG_FILE)
             try:
                 file_config = cls._load_runtime_config_file(LEGACY_CONFIG_FILE)
             except Exception:
@@ -1018,6 +1042,9 @@ class ConfigManager:
         # 支持编号格式的多群环境变量 (GROUP_1_ID / GROUP_2_ID ...)
         cls._merge_numbered_env_groups(file_config, driver_config)
 
+        # 运行时 JSON 中的 review_stages 可能是旧快照；以 YAML 当前内容为准。
+        cls._refresh_review_stages(file_config)
+
         cls._config = file_config
 
     @classmethod
@@ -1025,15 +1052,26 @@ class ConfigManager:
         """将当前配置序列化写入 JSON 文件。"""
         if cls._config is None:
             return
-        temp_file = CONFIG_FILE.with_name(f"{CONFIG_FILE.name}.tmp")
+        temp_file: Path | None = None
         try:
             payload = json.dumps(cls._config.model_dump(), ensure_ascii=False, indent=2)
-            temp_file.write_text(payload, encoding="utf-8")
+            with tempfile.NamedTemporaryFile(
+                "w",
+                encoding="utf-8",
+                dir=CONFIG_FILE.parent,
+                prefix=f"{CONFIG_FILE.name}.",
+                suffix=".tmp",
+                delete=False,
+            ) as handle:
+                temp_file = Path(handle.name)
+                handle.write(payload)
             temp_file.replace(CONFIG_FILE)
+            temp_file = None
+            cls._restrict_state_permissions(CONFIG_FILE)
         except Exception:
             logger.warning("保存配置文件失败", exc_info=True)
             try:
-                if temp_file.exists():
+                if temp_file is not None and temp_file.exists():
                     temp_file.unlink()
             except Exception:
                 logger.exception("清理配置临时文件失败")

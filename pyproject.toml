@@ -1,7 +1,7 @@
 [project]
-name = "bili-group-gatekeeper"
+name = "bilibili-qq-group-gatekeeper"
 version = "0.1.0"
-description = "Configurable QQ group application gatekeeper for NapCat and NoneBot"
+description = "Configurable QQ group join request gatekeeper with Bilibili verification, built on NoneBot2 and NapCat"
 readme = "README.md"
 license = "MIT"
 authors = [{ name = "NyakoWW" }]
@@ -30,9 +30,9 @@ dependencies = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/wuhutakeoffyoo/bili-group-gatekeeper"
-Repository = "https://github.com/wuhutakeoffyoo/bili-group-gatekeeper"
-Issues = "https://github.com/wuhutakeoffyoo/bili-group-gatekeeper/issues"
+Homepage = "https://github.com/wuhutakeoffyoo/bilibili-qq-group-gatekeeper"
+Repository = "https://github.com/wuhutakeoffyoo/bilibili-qq-group-gatekeeper"
+Issues = "https://github.com/wuhutakeoffyoo/bilibili-qq-group-gatekeeper/issues"
 
 [tool.uv]
 package = false
