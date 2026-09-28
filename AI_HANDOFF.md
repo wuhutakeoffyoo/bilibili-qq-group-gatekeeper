@@ -1,25 +1,24 @@
 # Bili Group Gatekeeper 交接文档（2026-09-28 版）
 
-本文档取代旧版 `AI_HANDOFF.md`（仍在 `C:\Users\NyakoWW\.codex\worktrees\eeed` 工作树中，未跟踪）。
+本文档取代旧版 `AI_HANDOFF.md`（旧版随旧 git 历史一并清除）。
 读者对象：接手的 AI。维护者是编程新手，解释请用简单中文，优先说明实际影响、修改效果与验证结果。
 
-> ⚠️ **最高优先级背景**：维护者已确认远端 git 提交历史含敏感信息，**计划删库重传**。
-> 在重传完成前，不要做任何"精修历史"的工作（rebase、改历史、补提交到旧线）；
-> 所有工作以"内容正确、可验证"为目标，历史整洁交给重传一步解决。重传指南见第七节。
+> ✅ **git 历史重置已完成（2026-09-28）**：因旧历史含部署配置文件形状与维护者认定的敏感内容，
+> 已删除旧 GitHub 仓库并以单提交干净历史重建（敏感扫描结论：全库无 API 密钥、无 Cookie 实值）。
+> 本地旧历史（备份分支/stash/reflog）也已物理清除。当前仓库 = 远端与本地完全一致的两条分支。
+> **维护者仍建议轮换一次 B站 Cookie / SMTP 授权码 / CookieCloud 密钥作为保险**。
 
 ## 一、当前状态总览（2026-09-28 历史重置后核对）
 
 | 位置 | 分支/状态 | 说明 |
 | --- | --- | --- |
-| `origin/main` 与 `origin/dev` | 均为 `062f77d` | **干净单提交历史**（54 文件全量代码），两者内容一致 |
-| `D:\Project\bili-group-gatekeeper` | `dev`（比远端多交接文档更新提交） | **本地权威工作线**，121 测试全绿 |
-| 备份分支 `backup/local-main-20260927` | 仅本地 | 旧 main 线（与远端无共同祖先），待新库确认后删除 |
-| 备份分支 `backup/local-dev-20260928` | 仅本地 | 旧 dev 线，代码内容已在 `062f77d` 中，待新库确认后删除 |
-| worktree `C:\Users\NyakoWW\.codex\worktrees\eeed` | `codex/api-hardening` | 旧线（内容已含于新历史），可删 |
-| worktree `C:\Users\NyakoWW\.codex\worktrees\3b13` | `codex/dev` | 2026-07 旧线（含杂散脚本），可删 |
+| `origin/main` | `062f77d` | 干净单提交历史（54 文件全量代码），默认分支 |
+| `origin/dev` | `5d253cd` | main + 交接文档更新，与本地 dev 一致 |
+| `D:\Project\bili-group-gatekeeper` | `dev` | **本地权威工作线**，121 测试全绿，与远端同步 |
+| `D:\Project\bili-group-gatekeeper-worktree-backup\` | 目录（非 git） | 两个已删除旧工作树中的杂散文件备份（含 `_fix_partname.py`——属另一个项目 autogetprice 的补丁脚本，误放在旧工作树中） |
 
-git 历史已按维护者决定重置为单提交（详见第七节）：远端仅剩 `main`、`dev` 两个分支；
-旧线全部提交只存在于本地备份分支与 GitHub 的 `refs/pull/*` 缓存中（后者需删库才能清除）。
+git 历史已重置：全库仅 2 个提交（`062f77d` 初始 + `5d253cd` 文档），旧线的备份分支、stash、
+reflog 已全部物理清除（`gc --prune=now`），旧工作树 `eeed`/`3b13` 已删除。
 
 ## 二、2026-09-27~28 完成的修复（全部在 main / PR #12）
 
@@ -84,19 +83,17 @@ git diff --check
 2. `database.py` 5 处"SQL 注入"：`PRAGMA table_info({table})`、`PRAGMA user_version = {version}`、`SELECT COUNT(*) FROM {table}` 的表名/版本号均为代码内写死常量，无可参数化的用户输入（SQL 标识符语法上本就无法参数化）。
 3. `bili_api.py` 的 MD5（wbi 官方签名算法规定步骤）与重试抖动用的 `random.uniform`（非密码学场景）。
 
-## 七、git 历史重置（2026-09-28 已执行，剩最后一步物理删除）
+## 七、git 历史重置（2026-09-28 已全部完成）
 
-**已完成**：
-- 全历史敏感扫描结论：**无任何 API 密钥**（sk-/ghp_/AKIA/AIza/Slack/PEM 私钥全库 0 命中）、**无 B站 Cookie 实值**（SESSDATA/bili_jct 全库 0 命中）；`.env.prod` 的 9 个历史版本全部为占位符（`你的xxx`/`127.0.0.1`/空值）。真正的敏感面是历史配置文件的"形状"与维护者自行确认的其他内容。
-- 顺带修复了门禁全部误报：`database.py` 的 PRAGMA/ALTER/SELECT COUNT 改为字面量 SQL、`email_notifier.py` 环境变量名用 `join` 构造、`bili_api.py` 抖动改用 `secrets`——此后新库提交不再被这些误报拦截（121 测试全绿）。
-- 干净单提交历史 `062f77d`（54 文件，含 AI_HANDOFF.md 与两份笔记）已强推替换远端 `main` 与 `dev`；远端 codex/* 分支已删除。
+**敏感扫描结论**（全对象裁决性核查）：**无任何 API 密钥**（sk-/ghp_/AKIA/AIza/Slack/PEM 私钥 0 命中）、**无 B站 Cookie 实值**（SESSDATA/bili_jct 的 17 个历史命中对象全部是测试占位符 `SESSDATA=value; bili_jct=csrf-token`）；`.env.prod` 的 9 个历史版本全部为占位符。维护者记忆中"明文写 Cookie"应属未提交的本地编辑或生产机部署副本，未进过 git。
 
-**⚠️ 剩最后一步（必须维护者手动完成）**：GitHub 仍保留 `refs/pull/N/head`（历史 PR 引用），旧提交（含 .env.prod 历史版本）仍可通过 PR 引用访问。彻底清除只能删库：
-- 方法 A（网页）：仓库 Settings → 拉到底 Danger Zone → Delete this repository → 重新创建同名仓库 → 本地 `git push -u origin main dev`
-- 方法 B（命令行授权）：终端运行 `gh auth refresh -h github.com -s delete_repo` 完成浏览器授权后，让 AI 执行 `gh repo delete` + 重建 + 推送
-- 删库会同时删除 Issues/PR/Star；重建后 Actions/Dependabot 按 `.github/` 配置自动生效
-- 本地 `backup/local-main-20260927`、`backup/local-dev-20260928` 两个备份分支与 `C:\Users\NyakoWW\.codex\worktrees\` 下两个旧工作树仍持有旧历史，**确认新库就绪后删除**
-- 保险起见建议轮换：B站 Cookie、QQ（若 ONEBOT token 曾真实配置）、SMTP 授权码、CookieCloud 密钥（本次扫描未见实值，轮换是低成本保险）
+**已执行**：
+- 门禁误报全部修复（见第五、六节），新库提交畅通
+- 干净单提交 `062f77d` 构建并强推替换远端 main/dev
+- 旧 GitHub 仓库已删除（`refs/pull/*` 旧历史缓存随之物理清除）、同名新仓库已重建并推送
+- 本地旧历史物理清除：备份分支/stash/reflog 已过期删除（`gc --prune=now`），旧工作树已移除（杂散文件备份于 `D:\Project\bili-group-gatekeeper-worktree-backup\`，其中 `_fix_partname.py` 属 autogetprice 项目）
+
+**保险动作（建议维护者执行）**：B站重新登录一次使旧 session 作废；SMTP 授权码、CookieCloud 密钥同理（扫描虽未见实值，轮换是低成本保险）。生产机（历史 `/opt/bili-group-gatekeeper`）下次维护时重新 clone 干净代码并按 `docs/deploy-systemd.md` 迁移 systemd。
 
 ## 八、遗留事项
 
