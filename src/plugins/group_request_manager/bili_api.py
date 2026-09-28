@@ -634,32 +634,47 @@ class BiliApi:
         if not isinstance(medals, list):
             return "inaccessible", [], "粉丝牌接口未返回有效列表"
 
-        return "ok", self._parse_medals(data), ""
+        medals, complete = self._parse_medals(data)
+        if not complete:
+            return "incomplete", medals, "粉丝牌列表包含缺失或无法解析的字段"
+        return "ok", medals, ""
 
-    def _parse_medals(self, data: dict) -> list[tuple[int, int]]:
-        """将粉丝牌接口响应解析为 (主播UID, 粉丝牌等级) 列表。"""
+    def _parse_medals(self, data: dict) -> tuple[list[tuple[int, int]], bool]:
+        """解析粉丝牌列表，并标记是否每个条目都可判读。"""
         medals: list[tuple[int, int]] = []
+        complete = True
         for item in data.get("data", {}).get("list", []):
+            if not isinstance(item, dict):
+                complete = False
+                continue
             medal_info = (
                 item.get("medal_info")
                 or item.get("medal")
                 or item.get("uinfo_medal")
                 or {}
             )
+            if not isinstance(medal_info, dict):
+                complete = False
+                continue
+            uinfo_medal = item.get("uinfo_medal")
+            anchor_info = item.get("anchor_info")
             anchor_uid_raw = (
                 medal_info.get("target_id")
                 or medal_info.get("ruid")
-                or (item.get("uinfo_medal") or {}).get("ruid")
-                or (item.get("anchor_info") or {}).get("uid")
+                or (uinfo_medal.get("ruid") if isinstance(uinfo_medal, dict) else None)
+                or (anchor_info.get("uid") if isinstance(anchor_info, dict) else None)
             )
             try:
-                anchor_uid = int(anchor_uid_raw or 0)
-                level = int(medal_info.get("level", 0))
+                anchor_uid = int(anchor_uid_raw)
+                level = int(medal_info["level"])
             except (KeyError, ValueError, TypeError):
+                complete = False
                 continue
-            if anchor_uid:
-                medals.append((anchor_uid, level))
-        return medals
+            if anchor_uid <= 0 or level < 0:
+                complete = False
+                continue
+            medals.append((anchor_uid, level))
+        return medals, complete
 
     async def check_medal_any_status(
         self, uid: int, target_uids: list[int], min_level: int
@@ -669,9 +684,6 @@ class BiliApi:
             return CheckResult("passed")
 
         status, medals, detail = await self.get_user_medals_status(uid)
-        if status != "ok":
-            return CheckResult("inaccessible", detail)
-
         target_uid_set = set(target_uids)
         for anchor_uid, level in medals:
             if anchor_uid in target_uid_set and level >= min_level:
@@ -680,6 +692,9 @@ class BiliApi:
                     matched_target_uid=anchor_uid,
                     matched_level=level,
                 )
+
+        if status != "ok":
+            return CheckResult("inaccessible", detail)
 
         return CheckResult(
             "failed",

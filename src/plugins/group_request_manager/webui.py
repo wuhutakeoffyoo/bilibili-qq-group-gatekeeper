@@ -81,7 +81,7 @@ def _is_loopback_host(host: str) -> bool:
 def _resolve_pipeline_file(config: PluginConfig) -> Path:
     """根据当前配置定位唯一的审核 YAML 文件。"""
     candidates = {
-        Path(group.review_pipeline_file).expanduser()
+        Path(group.review_pipeline_file).expanduser().resolve()
         for group in config.groups.values()
         if group.review_pipeline_file.strip()
     }
@@ -89,10 +89,7 @@ def _resolve_pipeline_file(config: PluginConfig) -> Path:
         return Path("review_pipeline.yaml").resolve()
     if len(candidates) != 1:
         raise ValueError("检测到多个 review_pipeline_file，当前 WebUI 仅支持编辑单个审核 YAML")
-    path = next(iter(candidates))
-    if not path.is_absolute():
-        path = (Path.cwd() / path).resolve()
-    return path
+    return next(iter(candidates))
 
 
 def _pipeline_payload(pipeline_file: Path) -> dict:
@@ -101,7 +98,7 @@ def _pipeline_payload(pipeline_file: Path) -> dict:
     return {"yaml": text, "groups": data.get("groups", []), "pipeline": data}
 
 
-def _save_pipeline(pipeline_file: Path, text: str) -> dict:
+def _save_pipeline(pipeline_file: Path, text: str, config: PluginConfig) -> dict:
     pipeline_file.parent.mkdir(parents=True, exist_ok=True)
     temp_path: Path | None = None
     with PIPELINE_WRITE_LOCK:
@@ -116,11 +113,19 @@ def _save_pipeline(pipeline_file: Path, text: str) -> dict:
             ) as handle:
                 handle.write(text)
                 temp_path = Path(handle.name)
-            load_review_stages_from_yaml_file(temp_path)
+            compiled_stages = load_review_stages_from_yaml_file(temp_path)
             data = yaml.safe_load(text) or {}
             if int(data.get("version", 0)) != 2:
                 raise ValueError("目前仅支持 version: 2（conditions + mode 分组格式）")
+            affected_groups = [
+                group
+                for group in list(config.groups.values())
+                if group.review_pipeline_file.strip()
+                and Path(group.review_pipeline_file).expanduser().resolve() == pipeline_file
+            ]
             temp_path.replace(pipeline_file)
+            for group in affected_groups:
+                group.review_stages = [stage.model_copy(deep=True) for stage in compiled_stages]
             return {"groups": data.get("groups", []), "pipeline": data, "yaml": text}
         finally:
             if temp_path is not None and temp_path.exists():
@@ -401,7 +406,7 @@ def start_webui(config: PluginConfig) -> ThreadingHTTPServer | None:
                     text = yaml.safe_dump(payload["pipeline"], allow_unicode=True, sort_keys=False)
                 else:
                     text = str(payload.get("yaml", ""))
-                result = _save_pipeline(pipeline_file, text)
+                result = _save_pipeline(pipeline_file, text, config)
                 self._json(HTTPStatus.OK, {"ok": True, **result})
             except (ValueError, json.JSONDecodeError, yaml.YAMLError) as exc:
                 self._json(HTTPStatus.BAD_REQUEST, {"error": str(exc)})

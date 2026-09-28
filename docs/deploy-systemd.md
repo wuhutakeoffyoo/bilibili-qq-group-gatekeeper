@@ -1,5 +1,7 @@
 # 使用 systemd 部署（替代 setsid 手工启动）
 
+项目现名为 **Bilibili QQ Group Gatekeeper**。为避免升级时意外启动两个审核进程，现有 `bili-group-gatekeeper.service` 单元名暂时保留；改名不要求改动已部署的 `/opt/bili-group-gatekeeper` 目录。新部署若使用新的仓库目录名，务必在复制服务文件后同步修改 `WorkingDirectory=`、`ExecStart=` 和下文凭据文件路径。不要同时启用旧、新两个服务单元。
+
 ## 为什么改
 
 历史上生产环境用 `setsid .venv/bin/python bot.py > bot.out 2> bot.err` 启动，有两个已知问题：
@@ -16,15 +18,26 @@
    # 找到旧进程后 kill <PID>，并确认 bot.out 不再增长
    ```
 
-2. 复制服务单元文件并按需修改前三处标注：
+2. 复制服务单元文件并按需修改运行用户、目录和 Python 路径：
 
    ```bash
    sudo cp deploy/bili-group-gatekeeper.service /etc/systemd/system/
    sudoedit /etc/systemd/system/bili-group-gatekeeper.service
-   # 核对：User=、WorkingDirectory=、ExecStart= 三行
+   # 核对：User=、WorkingDirectory=、ExecStart=；保留 UMask=0077
    ```
 
-3. 启动并设置开机自启：
+3. 收紧已有凭据文件的权限（路径及用户按服务单元的 `User=` 调整）：
+
+   ```bash
+   sudo chown gatekeeper:gatekeeper /opt/bili-group-gatekeeper/.env.prod
+   sudo chmod 600 /opt/bili-group-gatekeeper/.env.prod
+   if [ -f /opt/bili-group-gatekeeper/data/runtime/plugin_state.json ]; then
+       sudo chown gatekeeper:gatekeeper /opt/bili-group-gatekeeper/data/runtime/plugin_state.json
+       sudo chmod 600 /opt/bili-group-gatekeeper/data/runtime/plugin_state.json
+   fi
+   ```
+
+4. 启动并设置开机自启：
 
    ```bash
    sudo systemctl daemon-reload
