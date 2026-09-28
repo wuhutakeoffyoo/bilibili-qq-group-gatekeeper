@@ -65,7 +65,11 @@ def _get_smtp_config() -> Optional[dict]:
             ]
             if not value
         ]
-        logger.debug("邮件通知未配置，缺少环境变量: %s", ", ".join(missing))
+        safe_missing = [
+            "NOTIFY_SMTP_<REDACTED>" if name == ENV_SMTP_PASSWORD or "PASSWORD" in name else name
+            for name in missing
+        ]
+        logger.debug("邮件通知未配置，缺少环境变量: %s", ", ".join(safe_missing))
         return None
 
     port_str = os.getenv(ENV_SMTP_PORT, str(DEFAULT_SMTP_PORT)).strip()
