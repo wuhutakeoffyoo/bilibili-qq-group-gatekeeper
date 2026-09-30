@@ -1459,7 +1459,7 @@ def _format_help_text() -> str:
             "  /设置群 <群号> [<参数> <值> ...] 配置加群审核参数",
             "  /移除退群记录 <QQ号>         删除该 QQ 在所有群的退群记录",
             "  /设置cookie <B站Cookie>      手动设置 B 站 Cookie",
-            "  /获取cookie                  从 CookieCloud 同步 Cookie",
+            "  /获取cookie                  从已配置的 CookieCloud 同步 Cookie（可选）",
             "  /登录二维码                  生成 B 站扫码登录二维码",
             "  /待确认审批                  查看尚未确认的审批",
             "  /确认审批 <审计ID> <applied|failed> 人工确认审批结果",
@@ -1538,7 +1538,7 @@ async def _stop_background_tasks() -> None:
 
 @driver.on_startup
 async def ensure_bili_cookie_on_startup() -> None:
-    """启动时检查 B站 Cookie，必要时尝试 CookieCloud 并输出登录指引。"""
+    """启动时检查 B站 Cookie，已配置 CookieCloud 时尝试同步并输出登录指引。"""
     existing_cookie = ConfigManager.get_bili_cookie().strip()
     if existing_cookie:
         logger.info("已检测到 B站 Cookie，正在检查目标主播关注状态。")
@@ -1571,10 +1571,10 @@ async def ensure_bili_cookie_on_startup() -> None:
         + "\n[B站 Cookie 引导]\n"
         + "当前未获取到可用的 B站 Cookie。\n"
         + "你可以任选以下方式：\n"
-        + "1. 推荐：配置 CookieCloud，重启后会自动尝试同步\n"
-        + "2. 手动：在 .env.prod 的 BILI_COOKIE 中填入 Cookie\n"
-        + "3. 私聊管理员命令：/设置cookie <B站Cookie>\n"
-        + "4. 先扫码登录，再自行同步 Cookie 到本项目\n\n"
+        + "1. 在 .env.prod 的 BILI_COOKIE 中填入 Cookie\n"
+        + "2. 超级管理员私聊命令：/设置cookie <B站Cookie>\n"
+        + "3. 先扫码登录，再自行将 Cookie 提供给本项目\n"
+        + "4. 可选支持：已配置 CookieCloud 时，重启后会自动尝试同步\n\n"
         + "终端二维码如下：\n"
         + terminal_qrcode
         + "\n登录链接："

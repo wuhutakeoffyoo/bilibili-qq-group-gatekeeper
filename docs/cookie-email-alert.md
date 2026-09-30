@@ -25,4 +25,4 @@ NOTIFY_TO_ADDR="recipient@example.com"
 
 不要将真实 Cookie、邮箱密码或 SMTP 授权码提交到 Git。个人环境可从全局 `mail.md`/`mail_config.json` 将对应字段映射到上述环境变量；开源部署者只需使用自己的 SMTP 配置。
 
-Cookie 失效后，可由超级管理员私聊 Bot 执行 `/获取cookie` 从 CookieCloud 刷新。
+Cookie 失效后，可由超级管理员私聊 Bot 执行 `/设置cookie` 提供新的 Cookie。已配置 CookieCloud 时，还可使用 `/获取cookie` 同步；CookieCloud 仅提供可选支持。

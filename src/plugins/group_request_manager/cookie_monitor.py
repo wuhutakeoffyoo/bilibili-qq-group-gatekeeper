@@ -235,7 +235,7 @@ async def _notify_cookie_expired(detail: CookieCheckDetail) -> None:
         f"检测详情：{detail.message}\n\n"
         "更新方式：\n"
         "1. 使用 /设置cookie 命令手动设置\n"
-        "2. 使用 /获取cookie 命令从 CookieCloud 同步\n"
+        "2. 已配置 CookieCloud 时，可用 /获取cookie 命令同步（可选支持）\n"
         "3. 使用 /登录二维码 命令扫码登录\n"
     )
 
