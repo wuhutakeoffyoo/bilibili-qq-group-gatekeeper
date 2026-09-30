@@ -25,6 +25,11 @@ function Set-EnvValue([string]$Path, [string]$Key, [string]$Value) {
     [IO.File]::WriteAllLines((Resolve-Path $Path), $lines, [Text.UTF8Encoding]::new($false))
 }
 
+if (-not (Test-Path -LiteralPath ".env")) {
+    Copy-Item -LiteralPath ".env.example" -Destination ".env"
+    Write-Host "已从模板创建 .env" -ForegroundColor Cyan
+}
+
 if (-not (Test-Path -LiteralPath ".env.prod")) {
     Copy-Item -LiteralPath ".env.prod.example" -Destination ".env.prod"
     Write-Host "已从模板创建 .env.prod" -ForegroundColor Cyan
@@ -43,5 +48,5 @@ if (-not (Test-Path -LiteralPath ".env.prod")) {
 
 Write-Host "正在同步依赖..." -ForegroundColor Cyan
 uv sync --locked
-Write-Host "正在启动 Bili Group Gatekeeper..." -ForegroundColor Green
+Write-Host "正在启动 Bilibili QQ Group Gatekeeper..." -ForegroundColor Green
 uv run python bot.py

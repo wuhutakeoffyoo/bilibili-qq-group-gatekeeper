@@ -1,12 +1,14 @@
 [Unit]
-Description=Bili Group Gatekeeper (NoneBot2 QQ 加群审核)
+Description=Bilibili QQ Group Gatekeeper (NoneBot2 QQ 加群审核)
 After=network-online.target
 Wants=network-online.target
 
 [Service]
 Type=simple
+# 为兼容现有部署，systemd 单元名和默认 /opt 路径沿用旧名；新部署请按实际路径修改。
 # 以下三行按实际部署环境修改：运行用户、部署目录、虚拟环境里的 Python
 User=gatekeeper
+UMask=0077
 WorkingDirectory=/opt/bili-group-gatekeeper
 ExecStart=/opt/bili-group-gatekeeper/.venv/bin/python bot.py
 

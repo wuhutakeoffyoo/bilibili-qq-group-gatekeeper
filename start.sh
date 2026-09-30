@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 cd "$(dirname "$0")"
+umask 077
 
 QUICK=false
 case "${1:-}" in
@@ -17,6 +18,11 @@ if ! command -v uv >/dev/null 2>&1; then
   fi
   curl -LsSf https://astral.sh/uv/install.sh | sh
   export PATH="$HOME/.local/bin:$HOME/.cargo/bin:$PATH"
+fi
+
+if [ ! -f .env ]; then
+  cp .env.example .env
+  echo "已从模板创建 .env"
 fi
 
 if [ ! -f .env.prod ]; then
@@ -54,5 +60,5 @@ fi
 
 echo "正在同步依赖..."
 uv sync --locked
-echo "正在启动 Bili Group Gatekeeper..."
+echo "正在启动 Bilibili QQ Group Gatekeeper..."
 exec uv run python bot.py

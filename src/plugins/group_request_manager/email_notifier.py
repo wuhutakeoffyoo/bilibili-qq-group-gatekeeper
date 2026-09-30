@@ -54,18 +54,7 @@ def _get_smtp_config() -> Optional[dict]:
     to_addr = os.getenv(ENV_TO_ADDR, "").strip()
 
     if not all([host, user, password, from_addr, to_addr]):
-        missing = [
-            name
-            for name, value in [
-                (ENV_SMTP_HOST, host),
-                (ENV_SMTP_USER, user),
-                (ENV_SMTP_PASSWORD, password),
-                (ENV_FROM_ADDR, from_addr),
-                (ENV_TO_ADDR, to_addr),
-            ]
-            if not value
-        ]
-        logger.debug("邮件通知未配置，缺少环境变量: %s", ", ".join(missing))
+        logger.debug("邮件通知未配置完整，已跳过发送。")
         return None
 
     port_str = os.getenv(ENV_SMTP_PORT, str(DEFAULT_SMTP_PORT)).strip()

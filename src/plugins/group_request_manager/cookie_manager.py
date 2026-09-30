@@ -4,7 +4,7 @@ B 站 Cookie 管理模块。
 支持三种 Cookie 获取方式：
 1. 二维码登录 —— 生成二维码图片供扫码
 2. 手动输入 —— 通过 /设置cookie 命令
-3. CookieCloud —— 从 CookieCloud 服务同步
+3. CookieCloud（可选支持）—— 从已配置的 CookieCloud 服务同步
 """
 
 import hashlib
