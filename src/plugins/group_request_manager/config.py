@@ -2,7 +2,7 @@
 插件配置管理模块。
 
 配置分为两类：
-1. `.env.prod` —— 用户主要编辑的配置入口，适合放群配置、连接参数、CookieCloud 等
+1. `.env.prod` —— 用户主要编辑的配置入口，适合放群配置、连接参数及可选的 CookieCloud 配置等
 2. `data/runtime/plugin_state.json` —— 运行时状态文件，兼容命令写入和旧版本数据
 
 读取优先级（高到低）：

@@ -42,7 +42,7 @@
 
 ### 运维
 
-- Cookie 管理：支持手动设置、CookieCloud 自动同步和扫码登录引导；Cookie 生效后会检查并自动关注配置中的目标主播
+- Cookie 管理：支持手动设置和扫码登录引导，并提供可选的 CookieCloud 同步支持；Cookie 生效后会检查并自动关注配置中的目标主播
 - 本地日志：日志仅保存在本地，不上传云端、不自动清理
 - 磁盘空间监控：定期检查剩余空间，过低时私聊通知超级管理员
 - 申请审计：每次加群申请记录 QQ、B站昵称、UID、审核结果、条件详情
@@ -146,10 +146,10 @@ nano .env.prod
   - 共享同一套规则：使用 `GROUP_ID=111111111,222222222`，其余 `GROUP_ENABLED`、`GROUP_TARGET_UIDS` 等字段会同时应用到这些群
   - 分别配置每个群：使用 `GROUP_1_ID`、`GROUP_2_ID` 等编号格式字段
   - 详细示例见下文的 `## .env.prod 群配置参数说明`
-- `BILI_COOKIE`：可选，B 站 Cookie；也可以之后用 `/设置cookie` 写入，或通过 CookieCloud 自动同步（推荐）
-- `COOKIECLOUD_HOST`：CookieCloud 服务地址
-- `COOKIECLOUD_UUID`：CookieCloud UUID
-- `COOKIECLOUD_KEY`：CookieCloud 密钥
+- `BILI_COOKIE`：可选，B 站 Cookie；也可以之后用 `/设置cookie` 写入。已配置 CookieCloud 时，还支持自动同步
+- `COOKIECLOUD_HOST`：可选，CookieCloud 服务地址；仅在使用该同步功能时填写
+- `COOKIECLOUD_UUID`：可选，CookieCloud UUID
+- `COOKIECLOUD_KEY`：可选，CookieCloud 密钥
 
 基础配置（一般无需修改）：
 
@@ -159,17 +159,17 @@ nano .env.prod
 - `COMMAND_START`：命令前缀，默认 `["/", ""]`
 - `COMMAND_SEP`：命令分隔符，默认 `["."]`
 
-**关于 CookieCloud：**
+**CookieCloud 可选支持：**
 
-[CookieCloud](https://github.com/easychen/CookieCloud) 是一个独立的浏览器 Cookie 同步工具。推荐用户使用它在浏览器和服务器之间自动同步 B 站 Cookie，无需手动复制粘贴。
+[CookieCloud](https://github.com/easychen/CookieCloud) 是一个独立的浏览器 Cookie 同步工具。本项目仅提供可选的兼容支持；使用该工具的用户可以配置对应服务地址、UUID 和密钥以同步 B 站 Cookie。示例配置中的三项默认留空。
 
-**获取 B 站 Cookie 的三种方式：**
+**B 站 Cookie 的配置与登录方式：**
 
-| 方式              | 说明                                             |
-| --------------- | ---------------------------------------------- |
-| CookieCloud（推荐） | 浏览器安装 CookieCloud 插件并配置，自动同步，无需手动操作            |
-| 手动粘贴            | 在 `.env.prod` 的 `BILI_COOKIE` 中直接填入 Cookie 字符串 |
-| 扫码登录            | 私聊机器人发送 `/登录二维码` 生成登录链接；扫码后仍需通过 CookieCloud 或 `/设置cookie` 将 Cookie 同步给 Bot |
+| 方式 | 说明 |
+| --- | --- |
+| 手动粘贴 | 在 `.env.prod` 的 `BILI_COOKIE` 中直接填入 Cookie 字符串，或使用 `/设置cookie` 命令 |
+| 扫码登录引导 | 私聊机器人发送 `/登录二维码` 生成登录链接；扫码后仍需将 Cookie 写入配置或通过 `/设置cookie` 提供给 Bot |
+| CookieCloud（可选支持） | 已配置 CookieCloud 时，可在启动时自动同步，或使用 `/获取cookie` 命令同步 |
 
 说明：
 
