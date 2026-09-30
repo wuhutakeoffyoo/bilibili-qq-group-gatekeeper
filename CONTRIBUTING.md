@@ -1,6 +1,6 @@
 # 参与贡献
 
-感谢你愿意帮助改进 Bili Group Gatekeeper。项目面向不同经验水平的贡献者，问题描述不需要使用复杂术语。
+感谢你愿意帮助改进 Bilibili QQ Group Gatekeeper。项目面向不同经验水平的贡献者，问题描述不需要使用复杂术语。
 
 ## 提交问题
 
@@ -19,7 +19,7 @@ uv run python -m unittest discover -s tests
 uv run python -m compileall -q bot.py src tests
 ```
 
-真实配置应写入被 Git 忽略的 `.env.prod`。提交前请确认示例配置只包含占位值。
+真实配置应写入被 Git 忽略的 `.env.prod` 和 `*.local.yaml`。提交前请确认示例配置只包含占位值，不要提交真实群号、凭据或运行数据。
 
 ## Pull Request
 

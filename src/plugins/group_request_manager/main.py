@@ -154,6 +154,7 @@ class JoinRequestContext:
     bili_uid: int | None = None
     bili_level: int | None = None
     conflict_qq: str | None = None
+    conflict_lookup_known: bool = False
     qq_level: int | None = None
     bili_search_result: CheckResult = field(default_factory=lambda: CheckResult("not_required"))
     follow_result: CheckResult = field(default_factory=lambda: CheckResult("not_required"))
@@ -161,6 +162,7 @@ class JoinRequestContext:
     leave_status: str = "not_required"
     leave_record: object = None
     owned_other_bili_uids: list[int] = field(default_factory=list)
+    identity_change_lookup_known: bool = False
     condition_statuses: dict[str, RuleConditionStatus] = field(default_factory=dict)
     condition_states: dict[str, str] = field(default_factory=dict)
     condition_reasons: dict[str, str] = field(default_factory=dict)
@@ -694,6 +696,8 @@ def _build_rule_condition_statuses(
     owned_other_bili_uids: list[int],
     leave_record_known: bool = True,
     identity_binding_known: bool = True,
+    conflict_lookup_known: bool = False,
+    identity_change_lookup_known: bool = False,
 ) -> dict[str, RuleConditionStatus]:
     """基于各项检查结果生成分组管道所需的条件状态。"""
     statuses: dict[str, RuleConditionStatus] = {}
@@ -812,10 +816,16 @@ def _build_rule_condition_statuses(
             reason = _configured_reject_reason(group_config, "no_leave_record", reason)
             statuses["no_leave_record"] = RuleConditionStatus("false", reason)
 
+    bili_identity_known = (
+        bili_search_result.state == "passed"
+        and isinstance(bili_search_result.matched_target_uid, int)
+        and bili_search_result.matched_target_uid > 0
+    )
+
     if "no_conflict" in rule_conditions:
-        if not identity_binding_known:
+        if not (identity_binding_known and bili_identity_known and conflict_lookup_known):
             statuses["no_conflict"] = RuleConditionStatus(
-                "unknown", "未提供 QQ，无法判断是否存在账号冒用"
+                "unknown", "B站身份或绑定记录未能确认，无法判断是否存在账号冒用"
             )
         elif conflict_qq:
             statuses["no_conflict"] = RuleConditionStatus(
@@ -825,9 +835,9 @@ def _build_rule_condition_statuses(
             statuses["no_conflict"] = RuleConditionStatus("true")
 
     if "no_identity_change" in rule_conditions:
-        if not identity_binding_known:
+        if not (identity_binding_known and bili_identity_known and identity_change_lookup_known):
             statuses["no_identity_change"] = RuleConditionStatus(
-                "unknown", "未提供 QQ，无法判断是否存在改绑记录"
+                "unknown", "B站身份或绑定记录未能确认，无法判断是否存在改绑记录"
             )
         elif owned_other_bili_uids:
             joined_uids = "、".join(str(uid) for uid in owned_other_bili_uids)
@@ -1325,7 +1335,7 @@ async def _notify_disk_space_by_email(
     if not _should_attempt_disk_alert_email(level):
         return
 
-    subject = f"【Bili Group Gatekeeper 磁盘告警】{level}"
+    subject = f"【Bilibili QQ Group Gatekeeper 磁盘告警】{level}"
     free_space_text = f"{free_gb:.2f} GB" if free_gb is not None else "无法获取"
     body = (
         "项目检测到日志目录所在磁盘空间异常。\n\n"
@@ -1449,7 +1459,7 @@ def _format_help_text() -> str:
             "  /设置群 <群号> [<参数> <值> ...] 配置加群审核参数",
             "  /移除退群记录 <QQ号>         删除该 QQ 在所有群的退群记录",
             "  /设置cookie <B站Cookie>      手动设置 B 站 Cookie",
-            "  /获取cookie                  从 CookieCloud 同步 Cookie",
+            "  /获取cookie                  从已配置的 CookieCloud 同步 Cookie（可选）",
             "  /登录二维码                  生成 B 站扫码登录二维码",
             "  /待确认审批                  查看尚未确认的审批",
             "  /确认审批 <审计ID> <applied|failed> 人工确认审批结果",
@@ -1528,7 +1538,7 @@ async def _stop_background_tasks() -> None:
 
 @driver.on_startup
 async def ensure_bili_cookie_on_startup() -> None:
-    """启动时检查 B站 Cookie，必要时尝试 CookieCloud 并输出登录指引。"""
+    """启动时检查 B站 Cookie，已配置 CookieCloud 时尝试同步并输出登录指引。"""
     existing_cookie = ConfigManager.get_bili_cookie().strip()
     if existing_cookie:
         logger.info("已检测到 B站 Cookie，正在检查目标主播关注状态。")
@@ -1561,10 +1571,10 @@ async def ensure_bili_cookie_on_startup() -> None:
         + "\n[B站 Cookie 引导]\n"
         + "当前未获取到可用的 B站 Cookie。\n"
         + "你可以任选以下方式：\n"
-        + "1. 推荐：配置 CookieCloud，重启后会自动尝试同步\n"
-        + "2. 手动：在 .env.prod 的 BILI_COOKIE 中填入 Cookie\n"
-        + "3. 私聊管理员命令：/设置cookie <B站Cookie>\n"
-        + "4. 先扫码登录，再自行同步 Cookie 到本项目\n\n"
+        + "1. 在 .env.prod 的 BILI_COOKIE 中填入 Cookie\n"
+        + "2. 超级管理员私聊命令：/设置cookie <B站Cookie>\n"
+        + "3. 先扫码登录，再自行将 Cookie 提供给本项目\n"
+        + "4. 可选支持：已配置 CookieCloud 时，重启后会自动尝试同步\n\n"
         + "终端二维码如下：\n"
         + terminal_qrcode
         + "\n登录链接："
@@ -1713,6 +1723,7 @@ async def _populate_bili_context(
             context.actor_qq_for_binding,
             context.bili_uid,
         )
+        context.conflict_lookup_known = True
     if "no_identity_change" in pipeline_conditions:
         context.owned_other_bili_uids = [
             owned_uid
@@ -1722,6 +1733,7 @@ async def _populate_bili_context(
             )
             if owned_uid != context.bili_uid
         ]
+        context.identity_change_lookup_known = True
 
 
 @group_request_handler.handle()
@@ -1813,6 +1825,8 @@ async def handle_group_request(bot: Bot, event: GroupRequestEvent) -> None:
         leave_record=context.leave_record,
         conflict_qq=context.conflict_qq,
         owned_other_bili_uids=context.owned_other_bili_uids,
+        conflict_lookup_known=context.conflict_lookup_known,
+        identity_change_lookup_known=context.identity_change_lookup_known,
     )
     context.condition_states, context.condition_reasons = _build_condition_snapshot(
         context.condition_statuses
