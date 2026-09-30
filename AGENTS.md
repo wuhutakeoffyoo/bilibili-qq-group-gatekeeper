@@ -1,5 +1,9 @@
 # Repository Guidelines
 
+## Pull request delivery
+
+For PRs created or reviewed as part of user-authorized work in this repository, review the final diff, resolve conflicts, and wait for applicable CI checks to pass. Then merge into the intended base branch without asking for another confirmation. If checks fail, fix them before merging; report blockers that cannot be resolved within the task. This rule does not authorize unrelated changes or unattended merging of incoming PRs.
+
 ## Agent skills
 
 ### Issue tracker
