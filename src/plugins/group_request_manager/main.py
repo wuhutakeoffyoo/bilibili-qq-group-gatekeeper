@@ -22,6 +22,7 @@ from nonebot.adapters.onebot.v11 import (
     Message,
     MessageEvent,
 )
+from nonebot.adapters.onebot.v11.exception import ActionFailed
 from nonebot.params import CommandArg
 
 from .bili_api import BiliApi, CheckResult
@@ -37,6 +38,7 @@ from .config import (
 from .cookie_manager import CookieManager
 from . import cookie_monitor, email_notifier
 from .database import initialize_database
+from .decision_runtime import DecisionLocks, identity_decision_keys
 from .formatters import (
     CONDITION_CN_NAMES,
     format_condition_details as _format_condition_details,
@@ -105,6 +107,7 @@ _cookie_monitor_task: asyncio.Task | None = None
 _webui_server = None
 _bili_requests = BiliRequestCoordinator(max_concurrent=4, total_timeout=60.0)
 _automatic_decisions_paused = False
+_decision_locks = DecisionLocks()
 _disk_alert_email_state = {
     "current_level": None,
     "email_sent_for_current_alert": False,
@@ -1192,6 +1195,36 @@ async def _set_group_request_with_durable_audit(
     audit_kwargs: dict,
 ) -> bool:
     """Persist intent, execute OneBot action, then finalize the durable audit."""
+    event_flag = str(event.flag).strip()
+    request_key = (
+        ":".join(
+            (
+                str(getattr(bot, "self_id", "")),
+                str(audit_kwargs.get("group_id", "")),
+                str(event.sub_type),
+                event_flag,
+            )
+        )
+        if event_flag
+        else ""
+    )
+    async with _decision_locks.hold(f"request:{request_key}" if request_key else ""):
+        return await _execute_group_request_decision(
+            bot, event, approve=approve, reason=reason,
+            audit_kwargs=audit_kwargs, request_key=request_key,
+        )
+
+
+async def _execute_group_request_decision(
+    bot: Bot,
+    event: GroupRequestEvent,
+    *,
+    approve: bool,
+    reason: str,
+    audit_kwargs: dict,
+    request_key: str,
+) -> bool:
+    """Execute a decision while concurrent copies of its request are waiting."""
     global _automatic_decisions_paused
     if _automatic_decisions_paused:
         paused_kwargs = dict(audit_kwargs)
@@ -1208,19 +1241,6 @@ async def _set_group_request_with_durable_audit(
         )
         return False
 
-    event_flag = str(event.flag).strip()
-    request_key = (
-        ":".join(
-            (
-                str(getattr(bot, "self_id", "")),
-                str(audit_kwargs.get("group_id", "")),
-                str(event.sub_type),
-                event_flag,
-            )
-        )
-        if event_flag
-        else ""
-    )
     pending_audit = await run_storage(
         JoinRequestRecordManager.begin_pending_decision,
         **audit_kwargs,
@@ -1262,7 +1282,7 @@ async def _set_group_request_with_durable_audit(
         if reason:
             kwargs["reason"] = reason
         await bot.set_group_add_request(**kwargs)
-    except Exception as exc:
+    except ActionFailed as exc:
         logger.exception("调用加群审批接口失败")
         failure_reason = (
             "调用加群审批接口失败，申请保持未处理状态："
@@ -1280,6 +1300,19 @@ async def _set_group_request_with_durable_audit(
                 bot,
                 f"严重：审批接口失败后无法更新审计 #{pending_audit.id}，请检查 SQLite。",
             )
+        return False
+    except asyncio.CancelledError:
+        _automatic_decisions_paused = True
+        logger.warning("审批调用被取消，审计 #{} 保留待确认状态", pending_audit.id)
+        raise
+    except Exception as exc:
+        _automatic_decisions_paused = True
+        logger.exception("审批结果无法确认，保留 pending 审计并暂停自动审批")
+        await _notify_admins(
+            bot,
+            f"审批 #{pending_audit.id} 结果无法确认（{type(exc).__name__}）。"
+            "自动审批已暂停，请核对 QQ 群的实际结果，再使用 /确认审批 处理。",
+        )
         return False
 
     finalized = await run_storage(
@@ -1684,6 +1717,8 @@ async def _populate_bili_context(
     group_config: GroupConfig,
     pipeline_conditions: set[str],
     bili_cookie: str,
+    *,
+    lookup_bindings: bool = True,
 ) -> None:
     """填充审核上下文的 B站相关字段（搜索用户、关注、勋章等）。
 
@@ -1715,6 +1750,14 @@ async def _populate_bili_context(
             )
 
     await _bili_requests.run(bili_cookie, populate)
+    if lookup_bindings:
+        await _populate_identity_bindings(context, pipeline_conditions)
+
+
+async def _populate_identity_bindings(
+    context: JoinRequestContext, pipeline_conditions: set[str]
+) -> None:
+    """Read binding conditions inside the live request's identity decision locks."""
     if context.bili_uid is None:
         return
     if "no_conflict" in pipeline_conditions:
@@ -1734,6 +1777,62 @@ async def _populate_bili_context(
             if owned_uid != context.bili_uid
         ]
         context.identity_change_lookup_known = True
+
+
+async def _review_request_with_identity_guard(
+    context: JoinRequestContext,
+    stages: list[StageRuntime],
+    pipeline_conditions: set[str],
+) -> None:
+    """Keep identity reads and their resulting audit/approval in one critical section."""
+    async with _decision_locks.hold(*identity_decision_keys(context.user_id, context.bili_uid)):
+        try:
+            await _populate_identity_bindings(context, pipeline_conditions)
+        except Exception:
+            logger.exception("身份绑定查询失败，未确认的绑定条件按 I 处理")
+        context.condition_statuses = _build_rule_condition_statuses(
+            context.group_config,
+            pipeline_conditions,
+            qq_level=context.qq_level,
+            bili_search_result=context.bili_search_result,
+            bili_level=context.bili_level,
+            follow_result=context.follow_result,
+            medal_result=context.medal_result,
+            leave_record=context.leave_record,
+            conflict_qq=context.conflict_qq,
+            owned_other_bili_uids=context.owned_other_bili_uids,
+            conflict_lookup_known=context.conflict_lookup_known,
+            identity_change_lookup_known=context.identity_change_lookup_known,
+        )
+        context.condition_states, context.condition_reasons = _build_condition_snapshot(
+            context.condition_statuses
+        )
+
+        try:
+            execution = await _run_stage_pipeline(context, stages)
+        except ValueError as exc:
+            audit = await run_storage(
+                JoinRequestRecordManager.add_audit,
+                **_build_audit_kwargs_from_context(
+                    context,
+                    result="ignored",
+                    reasons=[f"审核分组路由无效：{exc}"],
+                )
+            )
+            if audit is None:
+                logger.critical("审核分组路由异常后无法写入忽略审计")
+                await _notify_admins(
+                    context.bot,
+                    f"严重：QQ {context.user_id} 的路由异常审计未能写入 SQLite，请检查数据库和磁盘空间。",
+                )
+            return
+        await _finalize_stage_decision(
+            context,
+            execution.stage,
+            execution.outcome,
+            execution.dispatch_result.flow_action,
+            execution.reasons,
+        )
 
 
 @group_request_handler.handle()
@@ -1791,7 +1890,8 @@ async def handle_group_request(bot: Bot, event: GroupRequestEvent) -> None:
             else:
                 try:
                     await _populate_bili_context(
-                        context, group_config, pipeline_conditions, bili_cookie
+                        context, group_config, pipeline_conditions, bili_cookie,
+                        lookup_bindings=False,
                     )
                 except Exception:
                     logger.exception("B站 API 流程异常")
@@ -1814,49 +1914,7 @@ async def handle_group_request(bot: Bot, event: GroupRequestEvent) -> None:
             )
             return
 
-    context.condition_statuses = _build_rule_condition_statuses(
-        group_config,
-        pipeline_conditions,
-        qq_level=context.qq_level,
-        bili_search_result=context.bili_search_result,
-        bili_level=context.bili_level,
-        follow_result=context.follow_result,
-        medal_result=context.medal_result,
-        leave_record=context.leave_record,
-        conflict_qq=context.conflict_qq,
-        owned_other_bili_uids=context.owned_other_bili_uids,
-        conflict_lookup_known=context.conflict_lookup_known,
-        identity_change_lookup_known=context.identity_change_lookup_known,
-    )
-    context.condition_states, context.condition_reasons = _build_condition_snapshot(
-        context.condition_statuses
-    )
-
-    try:
-        execution = await _run_stage_pipeline(context, stages)
-    except ValueError as exc:
-        audit = await run_storage(
-            JoinRequestRecordManager.add_audit,
-            **_build_audit_kwargs_from_context(
-                context,
-                result="ignored",
-                reasons=[f"审核分组路由无效：{exc}"],
-            )
-        )
-        if audit is None:
-            logger.critical("审核分组路由异常后无法写入忽略审计")
-            await _notify_admins(
-                bot,
-                f"严重：QQ {user_id} 的路由异常审计未能写入 SQLite，请检查数据库和磁盘空间。",
-            )
-        return
-    await _finalize_stage_decision(
-        context,
-        execution.stage,
-        execution.outcome,
-        execution.dispatch_result.flow_action,
-        execution.reasons,
-    )
+    await _review_request_with_identity_guard(context, stages, pipeline_conditions)
 
 
 # ---------------------------------------------------------------------------
@@ -1902,7 +1960,11 @@ async def handle_set_group_config(event: MessageEvent, arg: Message = CommandArg
         )
 
     group_id = args[0]
-    group_config = ConfigManager.get_group_config(group_id) or GroupConfig(group_id=group_id)
+    existing_config = ConfigManager.get_group_config(group_id)
+    group_config = (
+        existing_config.model_copy(deep=True) if existing_config
+        else GroupConfig(group_id=group_id)
+    )
 
     index = 1
     updated_fields: list[str] = []
@@ -1961,7 +2023,11 @@ async def handle_set_group_config(event: MessageEvent, arg: Message = CommandArg
             await set_group_config.finish(f"不支持的参数：{key}")
         index += 2
 
-    ConfigManager.set_group_config(group_config, updated_fields)
+    try:
+        ConfigManager.set_group_config(group_config, updated_fields)
+    except Exception:
+        logger.exception("群配置保存失败，保留原运行配置")
+        await set_group_config.finish("配置保存失败，原配置继续生效，请检查日志。")
     if updated_fields:
         follow_summary = ""
         if "target_uids" in updated_fields:
@@ -2111,7 +2177,7 @@ async def handle_remove_leave_record(event: MessageEvent, arg: Message = Command
 
 @show_pending_decisions.handle()
 async def handle_show_pending_decisions(event: MessageEvent) -> None:
-    """命令：/待确认审批 —— 查看进程异常后残留的 pending 审计。"""
+    """命令：/待确认审批 —— 查看尚未确认实际结果的 pending 审计。"""
     if not _is_private_superadmin_event(event):
         return
     audits = await run_storage(JoinRequestRecordManager.get_pending_decisions, 20)
@@ -2154,14 +2220,16 @@ async def handle_resolve_pending_decision(
         await resolve_pending_decision.finish("确认结果只能是 applied 或 failed")
 
     pending = await run_storage(JoinRequestRecordManager.get_pending_decisions, 1000)
-    if not any(audit.id == audit_id for audit in pending):
+    audit = next((audit for audit in pending if audit.id == audit_id), None)
+    if audit is None:
         await resolve_pending_decision.finish(f"审计 {audit_id} 不存在或已经确认")
-    finalized = await run_storage(
-        JoinRequestRecordManager.finalize_pending_decision,
-        audit_id,
-        applied=resolution == "applied",
-        failure_reason="超级管理员确认 QQ 审批未生效",
-    )
+    async with _decision_locks.hold(*identity_decision_keys(audit.qq, audit.bili_uid)):
+        finalized = await run_storage(
+            JoinRequestRecordManager.finalize_pending_decision,
+            audit_id,
+            applied=resolution == "applied",
+            failure_reason="超级管理员确认 QQ 审批未生效",
+        )
     if not finalized:
         await resolve_pending_decision.finish(f"审计 {audit_id} 确认失败，请检查 SQLite")
     remaining = await run_storage(JoinRequestRecordManager.get_pending_decision_count)
@@ -2181,10 +2249,11 @@ async def handle_clear_identity_binding(event: MessageEvent, arg: Message = Comm
     if not qq:
         await clear_identity_binding.finish("用法：/解除绑定 <QQ号>")
 
-    had_binding = (
-        await run_storage(JoinRequestRecordManager.get_user_binding, qq)
-    ) is not None
-    removed_uids = await run_storage(JoinRequestRecordManager.clear_identity_binding, qq)
+    async with _decision_locks.hold(*identity_decision_keys(qq, None)):
+        had_binding = (
+            await run_storage(JoinRequestRecordManager.get_user_binding, qq)
+        ) is not None
+        removed_uids = await run_storage(JoinRequestRecordManager.clear_identity_binding, qq)
     if not removed_uids and not had_binding:
         await clear_identity_binding.finish(f"未找到 QQ {qq} 的绑定记录")
 

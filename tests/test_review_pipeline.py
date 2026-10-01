@@ -11,6 +11,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
 import nonebot
+from nonebot.adapters.onebot.v11.exception import ActionFailed
 
 nonebot.init()
 
@@ -1076,9 +1077,9 @@ class DecisionDurabilityTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(finalize.call_args.args, (7,))
         self.assertEqual(finalize.call_args.kwargs, {"applied": True})
 
-    async def test_onebot_failure_marks_pending_audit_failed(self):
+    async def test_onebot_explicit_failure_marks_pending_audit_failed(self):
         bot = SimpleNamespace(
-            set_group_add_request=AsyncMock(side_effect=RuntimeError("offline"))
+            set_group_add_request=AsyncMock(side_effect=ActionFailed(retcode=100))
         )
         event = SimpleNamespace(flag="request-flag", sub_type="add")
         pending = SimpleNamespace(id=8)
@@ -1109,7 +1110,7 @@ class DecisionDurabilityTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(result)
         self.assertEqual(finalize.call_args.args, (8,))
         self.assertFalse(finalize.call_args.kwargs["applied"])
-        self.assertIn("RuntimeError", finalize.call_args.kwargs["failure_reason"])
+        self.assertIn("ActionFailed", finalize.call_args.kwargs["failure_reason"])
 
     async def test_finalize_failure_pauses_future_automatic_decisions(self):
         bot = SimpleNamespace(set_group_add_request=AsyncMock())
