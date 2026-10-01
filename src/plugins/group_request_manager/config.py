@@ -1092,8 +1092,8 @@ class ConfigManager:
     ) -> None:
         """写入指定群的配置并持久化。"""
         config = cls.get_config()
-        config.groups[group_config.group_id] = group_config
         cls._save_group_override(group_config, updated_fields)
+        config.groups[group_config.group_id] = group_config
 
     @classmethod
     def set_bili_cookie(cls, cookie: str) -> None:

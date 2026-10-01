@@ -26,9 +26,16 @@ library `sqlite3` module.
 - Preserve the existing manager APIs so command, review, and WebUI code do not depend on SQL.
 - Track schema changes with `PRAGMA user_version` and apply upgrades sequentially.
 - Record external approval decisions as `pending` before calling OneBot, then finalize them as
-  `applied` or `failed` so a successful QQ operation cannot silently lose its audit trail.
+  `applied` on success or `failed` on an explicit OneBot failure response. Timeouts, disconnections,
+  and cancelled calls remain `pending` and pause automatic decisions until an operator confirms
+  their actual outcome; a transport error does not prove that QQ left the request untouched.
 - Mark audits that require no OneBot action as `not_required`, and persist a unique request key so
   redelivered join-request events cannot execute the same approval action twice.
+- In the supported single-Bot deployment, hold process-local locks for the applicant QQ and Bilibili
+  UID from binding lookup through approval finalization. Unrelated identities remain concurrent;
+  manual binding removal and pending-decision confirmation use the same identity locks.
+- Serialize concurrent copies of the same request through its finalization. A duplicate that is
+  still running in this process is not treated as an orphaned `pending` decision.
 
 ## Consequences
 
