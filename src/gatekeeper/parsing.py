@@ -22,7 +22,9 @@ def parse_bili_identity(raw_input: str) -> BiliIdentityInput:
     brackets, and digit separators. Never extract digits from a nickname or from
     malformed UID text: a marked but invalid UID stays on the UID validation path.
     """
-    text = extract_bili_name(raw_input)
+    # The event adapter extracts Q&A once; an actual nickname may itself start
+    # with "答案：" and must not be shortened a second time here.
+    text = raw_input.strip()
     candidate = unicodedata.normalize("NFKC", "".join(c for c in text if unicodedata.category(c) != "Cf"))
     markers = list(_UID_MARKER.finditer(candidate))
     if markers:

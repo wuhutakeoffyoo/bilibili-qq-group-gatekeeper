@@ -42,7 +42,7 @@ class IdentityParsingTests(unittest.TestCase):
             ("B站UID：１２３，４５６", "uid", "123456"),
             ("ＵＩＤ = 123 456", "uid", "123456"),
             ("（UID：'123_456'）", "uid", "123456"),
-            ("问题：B站账号\n答案：UID：１２３４５６", "uid", "123456"),
+            ("UID：１２３４５６", "uid", "123456"),
             ("UID:abc123", "uid", "abc123"),
             ("UID:-123", "uid", "-123"),
             ("UID:1 UID:2", "uid", ""),
@@ -51,7 +51,7 @@ class IdentityParsingTests(unittest.TestCase):
             ("UID爱好者123", "nickname", "UID爱好者123"),
             ("１２Ａlice", "nickname", "１２Ａlice"),
             (" 昵称 带空格123 ", "nickname", "昵称 带空格123"),
-            ("问题：账号\n答案：Example_User123", "nickname", "Example_User123"),
+            ("答案：Example_User123", "nickname", "答案：Example_User123"),
         ]
         for raw, kind, value in cases:
             with self.subTest(raw=raw):
