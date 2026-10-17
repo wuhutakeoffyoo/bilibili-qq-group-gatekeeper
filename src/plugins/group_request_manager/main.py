@@ -33,10 +33,12 @@ from src.gatekeeper.conditions import (
 from src.gatekeeper.decisions import DecisionRequest, DecisionService, DefiniteActionFailure
 from src.gatekeeper.formatters import (
     build_reject_reason as _build_reject_reason,
+    build_stage_reject_reasons,
     format_action_text as _format_action_text,
     format_flow_action_text as _format_flow_action_text,
     format_group_config as _format_group_config,
     format_stage_pipeline_text as _format_stage_pipeline_text,  # noqa: F401 - compatibility export
+    format_uid_restriction_reason,
 )
 from src.gatekeeper.models import (
     RuleConditionStatus,
@@ -359,6 +361,8 @@ def _build_stage_notify_message(
     target_stage_index: int | None = None,
 ) -> str:
     """生成阶段命中后的管理员通知文本。"""
+    if flow_action == "reject":
+        reasons = _request_reject_reasons(context, reasons, stage=stage, outcome=outcome)
     outcome_text = {"true": "通过", "false": "未通过", "unknown": "无法判断"}.get(outcome, outcome)
     flow_text = _format_flow_action_text(flow_action, target_stage_index)
     return (
@@ -401,7 +405,7 @@ async def _finalize_stage_decision(
         ):
             return
     elif flow_action == "reject":
-        reasons = _request_reject_reasons(context, reasons)
+        reasons = _request_reject_reasons(context, reasons, stage=stage, outcome=outcome)
         reject_reason = _build_reject_reason(reasons)
         if not await _set_group_request_with_durable_audit(
             context.bot,
@@ -428,8 +432,12 @@ async def _finalize_stage_decision(
 
 
 
-def _request_reject_reasons(context: JoinRequestContext, reasons: list[str]) -> list[str]:
-    """Keep account correction guidance visible even with configured stage text."""
+def _request_reject_reasons(
+    context: JoinRequestContext, reasons: list[str], *, stage: StageRuntime | None = None, outcome: str = "false"
+) -> list[str]:
+    """Include actual failed checks and correction guidance in every rejection."""
+    if stage is not None:
+        reasons = build_stage_reject_reasons(stage, outcome, context.condition_statuses, reasons)
     if context.bili_search_result.state == "failed":
         reasons = [reason for reason in reasons if reason != LEGACY_NICKNAME_NOT_FOUND_MESSAGE]
         detail = context.bili_search_result.detail
@@ -1195,12 +1203,12 @@ async def handle_group_request(bot: Bot, event: GroupRequestEvent) -> None:
         )
         if custom_reject_reason:
             context.stage_results.append(
-                f"自定义拒绝名单 | UID {context.bili_uid} | 拒绝 | {custom_reject_reason}"
+                f"自定义拒绝名单 | UID {context.bili_uid} | 拒绝 | {format_uid_restriction_reason(custom_reject_reason)}"
             )
             await _finalize_early_decision(
                 context,
                 flow_action="reject",
-                reasons=[f"命中自定义拒绝名单：{custom_reject_reason}"],
+                reasons=[format_uid_restriction_reason(custom_reject_reason)],
                 stage_name="自定义拒绝名单",
             )
             return
@@ -1626,7 +1634,7 @@ async def handle_check_bili(event: MessageEvent, arg: Message = CommandArg()) ->
     )
     if custom_reject_reason:
         lines.append("")
-        lines.append(f"命中自定义拒绝名单：{custom_reject_reason} → 拒绝")
+        lines.append(f"拒绝：{format_uid_restriction_reason(custom_reject_reason)}")
         await check_bili.finish("\n".join(lines))
 
     context.condition_statuses = _build_rule_condition_statuses(
@@ -1673,7 +1681,7 @@ async def handle_check_bili(event: MessageEvent, arg: Message = CommandArg()) ->
         lines.append(f"最终动作：{_format_action_text(execution.dispatch_result.flow_action)}")
     reasons = execution.reasons
     if execution.dispatch_result.flow_action == "reject":
-        reasons = _request_reject_reasons(context, reasons)
+        reasons = _request_reject_reasons(context, reasons, stage=execution.stage, outcome=execution.outcome)
     lines.append(f"最终原因：{'；'.join(reasons) or '无'}")
     await check_bili.finish("\n".join(lines))
 

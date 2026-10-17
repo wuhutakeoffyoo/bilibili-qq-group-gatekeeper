@@ -72,7 +72,9 @@ class CoreConditionTests(unittest.TestCase):
             follow_result=CheckResult("inaccessible", detail),
         )
 
-        self.assertEqual(statuses["follow"], RuleConditionStatus("unknown", f"{detail}，按配置忽略"))
+        self.assertEqual(statuses["follow"].state, "unknown")
+        self.assertIn(detail, statuses["follow"].reason)
+        self.assertIn("请稍后重试或联系管理员", statuses["follow"].reason)
 
     def test_missing_thresholds_and_targets_are_unknown_despite_passed_observations(self):
         statuses = self.build_statuses(
@@ -110,8 +112,12 @@ class CoreConditionTests(unittest.TestCase):
             follow_result=CheckResult("failed"),
         )
 
-        self.assertEqual(statuses["qq_level"], RuleConditionStatus("false", "QQ等级未达标"))
-        self.assertEqual(statuses["follow"], RuleConditionStatus("false", "请先关注主播"))
+        self.assertEqual(statuses["qq_level"].state, "false")
+        self.assertIn("QQ等级未达标", statuses["qq_level"].reason)
+        self.assertIn("当前4级，本群要求至少10级", statuses["qq_level"].reason)
+        self.assertEqual(statuses["follow"].state, "false")
+        self.assertIn("请先关注主播", statuses["follow"].reason)
+        self.assertIn("UID：123", statuses["follow"].reason)
 
     def test_absent_qq_does_not_imply_no_leave_history(self):
         statuses = self.build_statuses(GroupConfig(group_id="1"), {"no_leave_record"}, leave_record_known=False)
@@ -128,7 +134,7 @@ class CoreConditionTests(unittest.TestCase):
 
         self.assertEqual(
             statuses["no_leave_record"],
-            RuleConditionStatus("false", "您曾于 2026-10-17 08:09:10 退群"),
+            RuleConditionStatus("false", "你曾于2026-10-17 08:09:10退出本群，未满足本群入群要求；如需重新加入，请联系管理员核实"),
         )
 
     def test_empty_identity_lookup_is_unknown_until_lookup_is_confirmed(self):

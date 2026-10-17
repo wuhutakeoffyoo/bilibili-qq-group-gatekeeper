@@ -51,6 +51,10 @@
 - UID 不存在时提示检查 UID，昵称搜不到时提示检查昵称或改填正确 UID；账号输入相关的拒绝反馈会明确告知“请不要填写B站昵称或UID以外的内容”。接口异常、风控及搜索分页不完整保留为“无法判断”，不冒充“账号不存在”。
 - 账号识别成功后，仍按本群配置检查等级、关注、绑定等条件，满足审核规则才会通过。
 
+### 拒绝反馈
+
+拒绝时会说明未通过的具体条件、实际等级或目标要求，以及下一步操作；自定义文案作为补充保留。接口暂时不可用时明确说明“无法核验”，按本群配置的 I 分支处理。详见[全部拒绝情况与反馈要求](docs/rejection-feedback.md)。
+
 ### 运维
 
 - Cookie 管理：支持手动设置和扫码登录引导，并提供可选的 CookieCloud 同步支持；Cookie 生效后会检查并自动关注配置中的目标主播
@@ -328,7 +332,7 @@ uv run --locked python bot.py
 - `target_medal_uids uid1,uid2`：设置目标主播 UID
 - `required_medal_level 等级`：设置粉丝牌最低等级
 - `reject_reason_with_leave_time on/off`：拒绝原因是否附带退群时间
-- `reject_reasons JSON`：按条件自定义拒绝原因，例如 `{"bili_account":"未搜索到账号","qq_level":"QQ等级过低"}`
+- `reject_reasons JSON`：按条件补充管理员说明，例如 `{"qq_level":"本群设有等级门槛"}`；程序同时保留实际测得值、要求及处理建议
 - `custom_reject_uids JSON`：自定义拒绝名单，JSON 格式的键值对；key 为要拒绝的 B站 UID，value 为该 UID 对应的拒绝理由；可以定义多个。例如：`{"123456":"疑似主播本人ID","654321":"已知违规用户"}`
 - `/解除绑定 <QQ号>`：清除该 QQ 当前持有的 B站绑定归属；解除后再次申请并填写新的 B站昵称时，会重新建立绑定
 - `/检查bili <群号> <B站UID或昵称>`：返回逐条件检查结果和最终判定，不会写入任何持久化数据
@@ -356,11 +360,8 @@ defaults:
   required_qq_level: 4
   required_bili_level: 2
   reject_reason_with_leave_time: false
-  reject_reasons:
-    bili_account: 未找到你填写的B站账号，请检查UID或昵称是否填写正确后重新申请。请不要填写B站昵称或UID以外的内容
-    follow: 你没有关注主播,本群为粉丝群,禁止非粉丝加入,若你确定已经关注了主播,请检查你填写的b站昵称是否正确
-    bili_level: 你的B站等级过低,疑似机器人账号
-    qq_level: 你的Q等级过低,疑似机器人账号
+  # 自动生成具体未通过的条件；可按条件补充管理员说明。
+  reject_reasons: {}
   review_pipeline_file: review_pipeline.yaml
 
 groups:

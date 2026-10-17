@@ -19,7 +19,9 @@ from src.gatekeeper.parsing import parse_bili_identity
 from src.plugins.group_request_manager import database, decision_adapter, main as manager
 from src.plugins.group_request_manager.bili_api import (
     BiliApi,
+    CheckResult,
     UID_INVALID_MESSAGE,
+    UID_NOT_FOUND_MESSAGE,
     reset_wbi_key_cache,
 )
 from src.plugins.group_request_manager.config import ConfigManager, GroupConfig, ReviewStageConfig
@@ -242,6 +244,76 @@ class JoinRequestRoutingSmokeTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("B站 UID：123456", finish.await_args.args[0])
         self.assertEqual([r.url.path for r in self.http_calls], ["/x/web-interface/card"])
         self.assertEqual(Records.get_all_user_audits("10001"), [])
+
+    async def test_every_rejecting_condition_reaches_qq_and_audit_with_specific_facts(self):
+        cases = [
+            ("bili_account", "未查到你填写的B站UID"),
+            ("bili_level", "当前1级"), ("qq_level", "当前3级"),
+            ("follow", "11、22"), ("medal", "至少5级"),
+            ("no_leave_record", "本群的退群记录"),
+            ("no_conflict", "另一个QQ绑定"), ("no_identity_change", "777"),
+        ]
+        for index, (condition, expected) in enumerate(cases):
+            with self.subTest(condition=condition):
+                group = GroupConfig(
+                    group_id="90001", required_bili_level=2, required_qq_level=4,
+                    target_uids=[11, 22], target_medal_uids=[33], required_medal_level=5,
+                    reject_reason_with_leave_time=False,
+                    reject_reasons={condition: "管理员条件补充"},
+                    review_stages=[ReviewStageConfig(
+                        index=1, conditions=[condition], on_true=["approve"], on_false=["reject"],
+                        on_unknown=["ignore"], on_false_reason="管理员阶段补充",
+                    )],
+                )
+                bot = SimpleNamespace(self_id="90000", set_group_add_request=AsyncMock())
+                event = SimpleNamespace(flag="condition-feedback-" + str(index), sub_type="add", group_id=90001, user_id=10001)
+                search = CheckResult("failed", UID_NOT_FOUND_MESSAGE) if condition == "bili_account" else CheckResult("passed", matched_target_uid=UID)
+                context = manager.JoinRequestContext(
+                    group_id="90001", user_id="10001", actor_qq_for_binding="10001", group_config=group,
+                    bot=bot, event=event, bili_name=NAME, bili_uid=search.matched_target_uid,
+                    bili_search_result=search, bili_level=1, qq_level=3,
+                )
+                context.condition_statuses = manager._build_rule_condition_statuses(
+                    group, {condition}, qq_level=3, bili_search_result=search, bili_level=1,
+                    follow_result=CheckResult("failed"), medal_result=CheckResult("failed"),
+                    leave_record=SimpleNamespace(leave_time="2026-10-17T08:09:10"),
+                    conflict_qq="private-other-qq", owned_other_bili_uids=[777],
+                    conflict_lookup_known=True, identity_change_lookup_known=True,
+                )
+                context.condition_states, context.condition_reasons = manager._build_condition_snapshot(context.condition_statuses)
+                execution = await manager._run_stage_pipeline(context, manager._get_review_stages(group))
+                await manager._finalize_stage_decision(context, execution.stage, execution.outcome, execution.dispatch_result.flow_action, execution.reasons)
+                call = bot.set_group_add_request.await_args.kwargs
+                self.assertFalse(call["approve"])
+                self.assertIn(expected, call["reason"])
+                self.assertIn("管理员阶段补充", call["reason"])
+                self.assertIn("管理员条件补充", call["reason"])
+                self.assertNotIn("private-other-qq", call["reason"])
+                audit = Records.get_all_user_audits("10001")[-1]
+                self.assertEqual((audit.result, audit.action_status), ("rejected", "applied"))
+                self.assertEqual(call["reason"], manager._build_reject_reason(audit.reasons))
+                notification = manager._build_stage_notify_message(context, execution.stage, execution.outcome, "reject", execution.reasons)
+                self.assertIn(expected, notification)
+
+    async def test_long_custom_text_cannot_truncate_account_correction_guidance(self):
+        self.group.review_stages[0].on_false_reason = "管理员补充说明" * 50
+        bot, audit = await self.submit("UID:999999999999", "long-feedback")
+        reason = bot.set_group_add_request.await_args.kwargs["reason"]
+        self.assertIn("未查到你填写的B站UID", reason)
+        self.assertIn("请不要填写B站昵称或UID以外的内容", reason)
+        self.assertEqual(reason, manager._build_reject_reason(audit.reasons))
+        self.assertGreater(len(reason), 120)
+
+    async def test_restriction_list_rejects_with_clear_cause_and_review_instructions(self):
+        for index, configured in enumerate(("管理员限制原因", " ")):
+            with self.subTest(configured=configured):
+                self.group.custom_reject_uids = {str(UID): configured}
+                bot, audit = await self.submit(NAME, "restriction-feedback-" + str(index))
+                reason = bot.set_group_add_request.await_args.kwargs["reason"]
+                self.assertFalse(bot.set_group_add_request.await_args.kwargs["approve"])
+                self.assertIn("本群限制名单", reason)
+                self.assertIn("联系管理员", reason)
+                self.assertEqual(reason, manager._build_reject_reason(audit.reasons))
 
 
 if __name__ == "__main__":

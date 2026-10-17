@@ -24,14 +24,10 @@ defaults:
   # 拒绝时是否在理由中附带退群时间；true=附带，false=不附带
   reject_reason_with_leave_time: false
 
-  # 各条件判定为 F 时返回给申请者的原因，可按群覆盖。
+  # 各条件判定为 F 时的管理员补充说明，可按群设置。
   # 最终发送时程序会自动添加半角前缀“来自BOT:”。
-  reject_reasons:
-    bili_account: 未找到你填写的B站账号，请检查UID或昵称是否填写正确后重新申请。请不要填写B站昵称或UID以外的内容
-    follow: 你没有关注主播,本群为粉丝群,禁止非粉丝加入,若你确定已经关注了主播,请检查你填写的b站昵称是否正确
-    bili_level: 你的B站等级过低,疑似机器人账号
-    qq_level: 你的Q等级过低,疑似机器人账号
-    no_leave_record: 检测到退群记录
+  # 程序按实际条件自动生成具体反馈；可按条件补充管理员说明。
+  reject_reasons: {}
 
   # 审核流程文件路径；相对路径按本 groups.yaml 所在目录解析
   # 指向 review_pipeline.yaml，定义审核分组流转逻辑
