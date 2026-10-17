@@ -7,6 +7,8 @@
 
 项目仍处于早期阶段，升级前请备份本地 `data/` 和 `.env.prod`。欢迎通过 [Issue](https://github.com/wuhutakeoffyoo/bilibili-qq-group-gatekeeper/issues) 报告问题，或阅读 [贡献指南](CONTRIBUTING.md) 参与开发。
 
+项目文档：[更新日志](CHANGELOG.md) · [开发目标与落地记录](docs/development-roadmap.md) · [原始筛选需求](docs/review-requirements.md)。后两份文档保留历史规划和需求，当前行为与配置以本 README 和 [领域说明](CONTEXT.md) 为准。
+
 ## 功能
 
 ### 审核规则
