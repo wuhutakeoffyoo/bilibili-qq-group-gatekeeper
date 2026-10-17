@@ -57,7 +57,7 @@ from src.gatekeeper.pipeline import (
     iter_pipeline,
 )
 
-from .bili_api import ACCOUNT_REQUIRED_MESSAGE, BiliApi, CheckResult
+from .bili_api import ACCOUNT_INPUT_GUIDANCE, ACCOUNT_REQUIRED_MESSAGE, BiliApi, CheckResult
 from .bili_runtime import BiliRequestCoordinator
 from .async_storage import run_storage
 from .config import (
@@ -434,7 +434,9 @@ def _request_reject_reasons(context: JoinRequestContext, reasons: list[str]) -> 
         reasons = [reason for reason in reasons if reason != LEGACY_NICKNAME_NOT_FOUND_MESSAGE]
         detail = context.bili_search_result.detail
         if detail and not any(detail in reason for reason in reasons):
-            return [*reasons, detail]
+            reasons = [*reasons, detail]
+        if not any(ACCOUNT_INPUT_GUIDANCE in reason for reason in reasons):
+            reasons = [*reasons, ACCOUNT_INPUT_GUIDANCE]
     return reasons
 
 
