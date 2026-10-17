@@ -25,6 +25,7 @@ from nonebot.adapters.onebot.v11.exception import ActionFailed
 from nonebot.params import CommandArg
 
 from src.gatekeeper.conditions import (
+    LEGACY_NICKNAME_NOT_FOUND_MESSAGE,
     build_condition_snapshot as _build_condition_snapshot,
     build_rule_condition_statuses as _build_rule_condition_statuses,
     requires_bili_identity as _requires_bili_identity,
@@ -56,7 +57,7 @@ from src.gatekeeper.pipeline import (
     iter_pipeline,
 )
 
-from .bili_api import BiliApi, CheckResult
+from .bili_api import ACCOUNT_REQUIRED_MESSAGE, BiliApi, CheckResult
 from .bili_runtime import BiliRequestCoordinator
 from .async_storage import run_storage
 from .config import (
@@ -400,6 +401,7 @@ async def _finalize_stage_decision(
         ):
             return
     elif flow_action == "reject":
+        reasons = _request_reject_reasons(context, reasons)
         reject_reason = _build_reject_reason(reasons)
         if not await _set_group_request_with_durable_audit(
             context.bot,
@@ -424,6 +426,16 @@ async def _finalize_stage_decision(
                 f"严重：QQ {context.user_id} 的忽略审计未能写入 SQLite，请立即检查数据库和磁盘空间。",
             )
 
+
+
+def _request_reject_reasons(context: JoinRequestContext, reasons: list[str]) -> list[str]:
+    """Keep account correction guidance visible even with configured stage text."""
+    if context.bili_search_result.state == "failed":
+        reasons = [reason for reason in reasons if reason != LEGACY_NICKNAME_NOT_FOUND_MESSAGE]
+        detail = context.bili_search_result.detail
+        if detail and not any(detail in reason for reason in reasons):
+            return [*reasons, detail]
+    return reasons
 
 
 async def _finalize_early_decision(
@@ -774,7 +786,7 @@ def _format_help_text() -> str:
             "  /查看配置 [<群号>]           查看全局或指定群的配置",
             "  /解除绑定 <QQ号>             清除该 QQ 当前的B站绑定归属",
             "  /检查qq <QQ号>               查看该 QQ 的申请与绑定记录",
-            "  /检查bili <群号> <B站昵称>   测试某B站昵称是否能通过审核",
+            "  /检查bili <群号> <B站UID或昵称>   测试B站账号是否能通过审核",
             "",
             "▎超级管理员专属",
             "  /设置群 <群号> [<参数> <值> ...] 配置加群审核参数",
@@ -1003,7 +1015,7 @@ async def _populate_bili_context(
     调用后检查 context.bili_uid 是否为 None 来判断搜索是否成功。
     """
     async def populate(api: BiliApi) -> None:
-        context.bili_search_result = await api.search_user_profile(context.bili_name or "")
+        context.bili_search_result = await api.resolve_user_profile(context.bili_name or "")
         context.bili_uid = context.bili_search_result.matched_target_uid
         context.bili_level = context.bili_search_result.matched_level
         if not context.bili_uid:
@@ -1157,7 +1169,7 @@ async def handle_group_request(bot: Bot, event: GroupRequestEvent) -> None:
 
     if _requires_bili_identity(pipeline_conditions):
         if not context.bili_name:
-            context.bili_search_result = CheckResult("failed", "未填写 B站账号")
+            context.bili_search_result = CheckResult("failed", ACCOUNT_REQUIRED_MESSAGE)
         else:
             bili_cookie = ConfigManager.get_bili_cookie()
             if not bili_cookie:
@@ -1544,7 +1556,7 @@ async def handle_check_qq(event: MessageEvent, arg: Message = CommandArg()) -> N
 
 @check_bili.handle()
 async def handle_check_bili(event: MessageEvent, arg: Message = CommandArg()) -> None:
-    """命令：/检查bili <群号> <B站昵称> —— 测试 B站昵称的审核结果（不持久化）。"""
+    """命令：/检查bili <群号> <B站UID或昵称> —— 测试审核结果（不持久化）。"""
     if not _is_private_admin_event(event):
         return
 
@@ -1555,12 +1567,12 @@ async def handle_check_bili(event: MessageEvent, arg: Message = CommandArg()) ->
         args = raw_args.split()
 
     if len(args) < 2:
-        await check_bili.finish("用法：/检查bili <群号> <B站昵称>")
+        await check_bili.finish("用法：/检查bili <群号> <B站UID或昵称>")
 
-    group_id, bili_name, *_ = args
-    bili_name = bili_name.strip()
+    group_id = args[0]
+    bili_name = " ".join(args[1:]).strip()
     if not bili_name:
-        await check_bili.finish("用法：/检查bili <群号> <B站昵称>")
+        await check_bili.finish("用法：/检查bili <群号> <B站UID或昵称>")
 
     group_config = ConfigManager.get_group_config(group_id)
     if not group_config:
@@ -1591,7 +1603,7 @@ async def handle_check_bili(event: MessageEvent, arg: Message = CommandArg()) ->
         "【B站审核测试】",
         "",
         f"群号：{group_id}",
-        f"B站昵称：{bili_name}",
+        f"B站输入：{bili_name}",
     ]
 
     try:
@@ -1657,7 +1669,10 @@ async def handle_check_bili(event: MessageEvent, arg: Message = CommandArg()) ->
         )
     else:
         lines.append(f"最终动作：{_format_action_text(execution.dispatch_result.flow_action)}")
-    lines.append(f"最终原因：{'；'.join(execution.reasons) or '无'}")
+    reasons = execution.reasons
+    if execution.dispatch_result.flow_action == "reject":
+        reasons = _request_reject_reasons(context, reasons)
+    lines.append(f"最终原因：{'；'.join(reasons) or '无'}")
     await check_bili.finish("\n".join(lines))
 
 

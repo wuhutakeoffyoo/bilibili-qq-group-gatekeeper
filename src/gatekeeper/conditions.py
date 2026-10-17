@@ -4,6 +4,8 @@ from .config import GroupConfig
 from .formatters import format_leave_time
 from .models import CheckResult, LeaveRecordLike, RuleConditionStatus
 
+LEGACY_NICKNAME_NOT_FOUND_MESSAGE = "未搜索到你填写的B站昵称，请不要输入与b站昵称无关的字段并检查你的昵称是否输入有误"
+
 
 def build_condition_snapshot(
     condition_statuses: dict[str, RuleConditionStatus],
@@ -27,7 +29,10 @@ def requires_bili_identity(rule_conditions: set[str]) -> bool:
 
 def configured_reject_reason(group_config: GroupConfig, condition: str, default: str) -> str:
     """返回条件专属拒绝原因，允许在群配置中覆盖。"""
-    return group_config.reject_reasons.get(condition, default)
+    reason = group_config.reject_reasons.get(condition, default)
+    if condition == "bili_account" and reason == LEGACY_NICKNAME_NOT_FOUND_MESSAGE:
+        return default
+    return reason
 
 
 def build_rule_condition_statuses(
@@ -59,7 +64,7 @@ def build_rule_condition_statuses(
                 configured_reject_reason(
                     group_config,
                     "bili_account",
-                    "未搜索到你填写的B站昵称，请不要输入与b站昵称无关的字段并检查你的昵称是否输入有误",
+                    bili_search_result.detail or "未找到你填写的B站账号，请检查UID或昵称是否填写正确后重新申请",
                 ),
             )
         else:

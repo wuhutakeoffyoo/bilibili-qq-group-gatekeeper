@@ -88,7 +88,7 @@ class IdentityLookupFlowTests(unittest.IsolatedAsyncioTestCase):
             group_id="1", user_id="10001", group_config=config,
             actor_qq_for_binding="10001", bili_name="example",
         )
-        api = SimpleNamespace(search_user_profile=AsyncMock(return_value=CheckResult(
+        api = SimpleNamespace(resolve_user_profile=AsyncMock(return_value=CheckResult(
             "passed", matched_target_uid=123, matched_level=5,
         )))
 
