@@ -91,7 +91,7 @@ class DecisionRecoveryTests(unittest.IsolatedAsyncioTestCase):
             return CheckResult("passed", matched_target_uid=889 if name == "second-name" else 888, matched_level=6)
 
         async def run_api(cookie, operation):
-            return await operation(SimpleNamespace(search_user_profile=search))
+            return await operation(SimpleNamespace(resolve_user_profile=search))
 
         self.stack.enter_context(patch.object(manager._bili_requests, "run", new=run_api))
         return second_search

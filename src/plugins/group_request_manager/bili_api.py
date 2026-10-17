@@ -8,6 +8,7 @@ B 站 API 封装模块。
 import asyncio
 import hashlib
 import logging
+import re
 import secrets
 import time
 from http.cookies import CookieError, SimpleCookie
@@ -17,6 +18,7 @@ from urllib.parse import quote
 import httpx
 
 from src.gatekeeper.models import CheckResult
+from src.gatekeeper.parsing import parse_bili_identity
 
 # 请求头模拟浏览器，避免被反爬
 HEADERS = {
@@ -35,11 +37,12 @@ FOLLOWINGS_MAX_PAGES = 20
 SEARCH_URL = "https://api.bilibili.com/x/web-interface/wbi/search/type"
 SEARCH_FALLBACK_URL = "https://api.bilibili.com/x/web-interface/search/type"
 NAV_URL = "https://api.bilibili.com/x/web-interface/nav"
+UID_PROFILE_URL = "https://api.bilibili.com/x/web-interface/card"
 
-# B站搜索默认拒绝文案：申请者填写的昵称未搜索到
-NICKNAME_NOT_FOUND_MESSAGE = (
-    "未搜索到你填写的B站昵称，请不要输入与b站昵称无关的字段并检查你的昵称是否输入有误"
-)
+NICKNAME_NOT_FOUND_MESSAGE = "未搜索到你填写的B站昵称，请检查昵称是否填写正确，或填写正确的UID后重新申请"
+UID_NOT_FOUND_MESSAGE = "未查到你填写的B站UID，请检查UID是否填写正确后重新申请"
+UID_INVALID_MESSAGE = "你填写的B站UID格式有误，请检查并填写正确的纯数字UID后重新申请"
+ACCOUNT_REQUIRED_MESSAGE = "未填写B站账号，请检查并填写正确的UID或昵称后重新申请"
 # 搜索结果分页不完整时不能断定“昵称不存在”，只能按无法判断处理
 SEARCH_INCOMPLETE_MESSAGE = "B站搜索结果不完整，无法确认是否存在该昵称"
 
@@ -168,6 +171,46 @@ class BiliApi:
     # 用户搜索
     # ------------------------------------------------------------------
 
+    async def resolve_user_profile(self, answer: str) -> CheckResult:
+        """Route cleaned UID input to a UID lookup, and character input to search."""
+        identity = parse_bili_identity(answer)
+        if identity.kind == "uid":
+            return await self.get_user_profile_by_uid(identity.value)
+        return await self.search_user_profile(identity.value)
+
+    async def get_user_profile_by_uid(self, uid: int | str) -> CheckResult:
+        """Resolve only the requested UID; never fall back to nickname search."""
+        text = str(uid)
+        if isinstance(uid, bool) or not re.fullmatch(r"[0-9]{1,20}", text) or int(text) <= 0:
+            return CheckResult("failed", UID_INVALID_MESSAGE)
+        requested_uid = int(text)
+        try:
+            data = await self._get(UID_PROFILE_URL, {"mid": requested_uid})
+        except Exception:
+            logger.warning("按 UID 查询 B站账号失败, uid=%s", requested_uid, exc_info=True)
+            return CheckResult("inaccessible", "B站UID查询接口请求失败，请稍后重试")
+        if data.get("code") == -404:
+            return CheckResult("failed", UID_NOT_FOUND_MESSAGE)
+        if data.get("code") != 0:
+            return CheckResult("inaccessible", f"B站UID查询接口不可用(code={data.get('code')})，请稍后重试")
+        payload = data.get("data")
+        card = payload.get("card") if isinstance(payload, dict) else None
+        level_info = card.get("level_info") if isinstance(card, dict) else None
+        if not isinstance(card, dict) or not isinstance(level_info, dict):
+            return CheckResult("inaccessible", "B站UID资料不完整，无法确认账号和等级")
+        try:
+            actual_uid, level = card["mid"], level_info["current_level"]
+            if isinstance(actual_uid, bool) or isinstance(level, bool):
+                raise ValueError("boolean account metadata")
+            if not re.fullmatch(r"[0-9]+", str(actual_uid)) or not re.fullmatch(r"[0-9]+", str(level)):
+                raise ValueError("invalid account metadata")
+            actual_uid, level = int(actual_uid), int(level)
+        except (KeyError, ValueError, TypeError):
+            return CheckResult("inaccessible", "B站UID资料不完整，无法确认账号和等级")
+        if actual_uid != requested_uid:
+            return CheckResult("inaccessible", "B站UID查询结果与输入不一致，无法确认账号")
+        return CheckResult("passed", matched_target_uid=actual_uid, matched_level=level)
+
     async def _get_wbi_keys(self) -> Optional[tuple[str, str]]:
         """获取 Wbi 签名密钥；进程内缓存定期刷新，nav 失败时返回 None。"""
         now = time.monotonic()
@@ -242,7 +285,7 @@ class BiliApi:
         按“无法判断”处理，而不是断定昵称不存在。
         """
         if not keyword.strip():
-            return CheckResult("failed", "未填写 B站账号")
+            return CheckResult("failed", ACCOUNT_REQUIRED_MESSAGE)
 
         try:
             data = await self._search_bili_users(keyword)

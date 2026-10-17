@@ -1,6 +1,41 @@
 """Parse incoming application answers and account metadata without I/O."""
 
 import re
+import unicodedata
+from dataclasses import dataclass
+from typing import Literal
+
+
+@dataclass(frozen=True)
+class BiliIdentityInput:
+    kind: Literal["uid", "nickname"]
+    value: str
+
+
+_UID_MARKER = re.compile(r"(?<![A-Za-z0-9_])uid(?=\s|[:=]|[0-9]|$)\s*[:=]?\s*", re.IGNORECASE)
+
+
+def parse_bili_identity(raw_input: str) -> BiliIdentityInput:
+    """Explicit UID markers take priority; other nonnumeric answers remain nicknames.
+
+    Normalize fullwidth UID input, invisible formatting, surrounding quotes and
+    brackets, and digit separators. Never extract digits from a nickname or from
+    malformed UID text: a marked but invalid UID stays on the UID validation path.
+    """
+    # The event adapter extracts Q&A once; an actual nickname may itself start
+    # with "答案：" and must not be shortened a second time here.
+    text = raw_input.strip()
+    candidate = unicodedata.normalize("NFKC", "".join(c for c in text if unicodedata.category(c) != "Cf"))
+    markers = list(_UID_MARKER.finditer(candidate))
+    if markers:
+        if len(markers) != 1:
+            return BiliIdentityInput("uid", "")
+        value = candidate[markers[0].end():].strip().strip("\"'`“”‘’()[]{}【】<>《》 ")
+        value = re.sub(r"[\s,_、]+", "", value)
+        return BiliIdentityInput("uid", value)
+    if re.fullmatch(r"[0-9]+", candidate.strip()):
+        return BiliIdentityInput("uid", candidate.strip())
+    return BiliIdentityInput("nickname", text)
 
 
 def extract_bili_name(raw_comment: str) -> str:

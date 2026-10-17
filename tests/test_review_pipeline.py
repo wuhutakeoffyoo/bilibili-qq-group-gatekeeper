@@ -275,7 +275,7 @@ groups:
             GroupConfig(group_id="1", required_bili_level=2),
             {"bili_account", "bili_level"},
             qq_level=None,
-            bili_search_result=CheckResult("failed", "未搜索到用户"),
+            bili_search_result=CheckResult("failed", "未搜索到你填写的B站昵称，请检查昵称是否填写正确，或填写正确的UID后重新申请"),
             bili_level=None,
             follow_result=CheckResult("not_required"),
             medal_result=CheckResult("not_required"),
@@ -287,7 +287,7 @@ groups:
         self.assertEqual(statuses["bili_account"].state, "false")
         self.assertEqual(
             statuses["bili_account"].reason,
-            "未搜索到你填写的B站昵称，请不要输入与b站昵称无关的字段并检查你的昵称是否输入有误",
+            "未搜索到你填写的B站昵称，请检查昵称是否填写正确，或填写正确的UID后重新申请",
         )
         self.assertEqual(statuses["bili_level"].state, "unknown")
         self.assertIn("未搜索到B站账号", statuses["bili_level"].reason)
@@ -1272,7 +1272,7 @@ class BiliSearchTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(not_found.state, "failed")
         self.assertEqual(
             not_found.detail,
-            "未搜索到你填写的B站昵称，请不要输入与b站昵称无关的字段并检查你的昵称是否输入有误",
+            "未搜索到你填写的B站昵称，请检查昵称是否填写正确，或填写正确的UID后重新申请",
         )
         self.assertEqual(unavailable.state, "inaccessible")
 
@@ -1296,7 +1296,7 @@ class BiliSearchTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsNone(result.matched_target_uid)
         self.assertEqual(
             result.detail,
-            "未搜索到你填写的B站昵称，请不要输入与b站昵称无关的字段并检查你的昵称是否输入有误",
+            "未搜索到你填写的B站昵称，请检查昵称是否填写正确，或填写正确的UID后重新申请",
         )
 
     async def test_search_profile_rejects_multiple_exact_matches(self):
