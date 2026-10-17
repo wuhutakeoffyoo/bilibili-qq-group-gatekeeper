@@ -16,6 +16,8 @@ from nonebot.adapters.onebot.v11.exception import ActionFailed
 nonebot.init()
 
 from src.plugins.group_request_manager.bili_api import BiliApi, CheckResult
+from src.gatekeeper.decisions import DecisionService
+from src.plugins.group_request_manager.decision_adapter import SqliteDecisionStorage
 from src.plugins.group_request_manager.bili_runtime import BiliRequestCoordinator
 from src.plugins.group_request_manager.async_storage import run_storage
 from src.plugins.group_request_manager import main as manager_main
@@ -1007,10 +1009,11 @@ class QQLevelTests(unittest.IsolatedAsyncioTestCase):
 
 class DecisionDurabilityTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
-        manager_main._automatic_decisions_paused = False
-
-    async def asyncTearDown(self):
-        manager_main._automatic_decisions_paused = False
+        service_patch = patch.object(
+            manager_main, "_decision_service", DecisionService(SqliteDecisionStorage())
+        )
+        service_patch.start()
+        self.addCleanup(service_patch.stop)
 
     async def test_onebot_action_is_not_called_when_pending_audit_cannot_be_saved(self):
         bot = SimpleNamespace(set_group_add_request=AsyncMock())
@@ -1041,7 +1044,7 @@ class DecisionDurabilityTests(unittest.IsolatedAsyncioTestCase):
     async def test_successful_onebot_action_finalizes_pending_audit(self):
         bot = SimpleNamespace(set_group_add_request=AsyncMock())
         event = SimpleNamespace(flag="request-flag", sub_type="add")
-        pending = SimpleNamespace(id=7)
+        pending = SimpleNamespace(id=7, was_created=True, action_status="pending")
         with (
             patch.object(
                 JoinRequestRecordManager,
@@ -1075,14 +1078,15 @@ class DecisionDurabilityTests(unittest.IsolatedAsyncioTestCase):
             reason="来自BOT:拒绝原因",
         )
         self.assertEqual(finalize.call_args.args, (7,))
-        self.assertEqual(finalize.call_args.kwargs, {"applied": True})
+        self.assertTrue(finalize.call_args.kwargs["applied"])
+        self.assertEqual(finalize.call_args.kwargs["failure_reason"], "")
 
     async def test_onebot_explicit_failure_marks_pending_audit_failed(self):
         bot = SimpleNamespace(
             set_group_add_request=AsyncMock(side_effect=ActionFailed(retcode=100))
         )
         event = SimpleNamespace(flag="request-flag", sub_type="add")
-        pending = SimpleNamespace(id=8)
+        pending = SimpleNamespace(id=8, was_created=True, action_status="pending")
         with (
             patch.object(
                 JoinRequestRecordManager,
@@ -1119,7 +1123,7 @@ class DecisionDurabilityTests(unittest.IsolatedAsyncioTestCase):
             patch.object(
                 JoinRequestRecordManager,
                 "begin_pending_decision",
-                return_value=SimpleNamespace(id=9),
+                return_value=SimpleNamespace(id=9, was_created=True, action_status="pending"),
             ),
             patch.object(
                 JoinRequestRecordManager,
@@ -1141,7 +1145,7 @@ class DecisionDurabilityTests(unittest.IsolatedAsyncioTestCase):
             )
 
         self.assertFalse(result)
-        self.assertTrue(manager_main._automatic_decisions_paused)
+        self.assertTrue(manager_main._decision_service.paused)
         notify.assert_awaited_once()
 
     async def test_already_applied_duplicate_does_not_call_onebot_again(self):

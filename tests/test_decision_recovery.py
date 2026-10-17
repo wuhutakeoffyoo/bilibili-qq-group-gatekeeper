@@ -15,8 +15,10 @@ nonebot.init()
 
 from nonebot.adapters.onebot.v11.exception import NetworkError
 from nonebot.exception import FinishedException
+from src.gatekeeper.decisions import DecisionService
 from src.plugins.group_request_manager import database as database_module
 from src.plugins.group_request_manager import config as config_module
+from src.plugins.group_request_manager import decision_adapter
 from src.plugins.group_request_manager import main as manager
 from src.plugins.group_request_manager.bili_api import CheckResult
 from src.plugins.group_request_manager.config import ConfigManager, GroupConfig, PluginConfig, ReviewStageConfig
@@ -46,8 +48,9 @@ class DecisionRecoveryTests(unittest.IsolatedAsyncioTestCase):
             self.stack.enter_context(patch.object(database_module, attribute, root / name))
         database_module.reset_database_state()
         self.addCleanup(database_module.reset_database_state)
-        self.stack.enter_context(patch.object(manager, "_automatic_decisions_paused", False))
-        self.stack.enter_context(patch.object(manager, "_decision_locks", DecisionLocks()))
+        self.stack.enter_context(patch.object(
+            manager, "_decision_service", DecisionService(decision_adapter.SqliteDecisionStorage())
+        ))
         self.stack.enter_context(patch.object(manager, "_notify_admins", new=AsyncMock()))
 
         async def immediate_storage(function, *args, **kwargs):
@@ -55,6 +58,7 @@ class DecisionRecoveryTests(unittest.IsolatedAsyncioTestCase):
             return function(*args, **kwargs)
 
         self.stack.enter_context(patch.object(manager, "run_storage", new=immediate_storage))
+        self.stack.enter_context(patch.object(decision_adapter, "run_storage", new=immediate_storage))
         self.tasks = []
         self.addAsyncCleanup(self.cancel_remaining_tasks)
 
@@ -158,7 +162,7 @@ class DecisionRecoveryTests(unittest.IsolatedAsyncioTestCase):
             bot, request_event("first"), approve=True, audit_kwargs=audit_kwargs(),
         ))
         await asyncio.sleep(0)
-        self.assertFalse(manager._automatic_decisions_paused)
+        self.assertFalse(manager._decision_service.paused)
         self.assertFalse(duplicate.done())
         release.set()
         self.assertEqual(await asyncio.gather(first, duplicate), [True, True])
@@ -166,7 +170,7 @@ class DecisionRecoveryTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(await manager._set_group_request_with_durable_audit(
             bot, request_event("next", qq=10002), approve=True, audit_kwargs=audit_kwargs(qq="10002", uid=889),
         ))
-        self.assertFalse(manager._automatic_decisions_paused)
+        self.assertFalse(manager._decision_service.paused)
         self.assertEqual(bot.set_group_add_request.await_count, 2)
 
     async def test_orphan_pending_duplicate_still_requires_confirmation(self):
@@ -175,7 +179,7 @@ class DecisionRecoveryTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(await manager._set_group_request_with_durable_audit(
             bot, request_event("orphan"), approve=True, audit_kwargs=audit_kwargs(),
         ))
-        self.assertTrue(manager._automatic_decisions_paused)
+        self.assertTrue(manager._decision_service.paused)
         self.assertEqual(Records.get_pending_decisions()[0].id, audit.id)
         bot.set_group_add_request.assert_not_awaited()
 
@@ -194,7 +198,7 @@ class DecisionRecoveryTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(accepted, ["lost-response"])
         self.assertEqual(audit.result, "approved")
         self.assertEqual(audit.action_status, "pending")
-        self.assertTrue(manager._automatic_decisions_paused)
+        self.assertTrue(manager._decision_service.paused)
         self.assertIsNone(Records.get_bili_binding(888))
         with patch.object(manager, "_is_private_superadmin_event", return_value=True), patch.object(
             manager.resolve_pending_decision, "finish", new=AsyncMock(side_effect=FinishedException),
@@ -202,7 +206,7 @@ class DecisionRecoveryTests(unittest.IsolatedAsyncioTestCase):
             with self.assertRaises(FinishedException):
                 await manager.handle_resolve_pending_decision(SimpleNamespace(), f"{audit.id} applied")
         self.assertEqual(Records.get_pending_decision_count(), 0)
-        self.assertFalse(manager._automatic_decisions_paused)
+        self.assertFalse(manager._decision_service.paused)
         self.assertEqual(Records.get_bili_binding(888).owner_qq, "10001")
         self.assertEqual(Records.get_all_user_audits("10001")[0].action_status, "applied")
 
@@ -215,7 +219,7 @@ class DecisionRecoveryTests(unittest.IsolatedAsyncioTestCase):
         task.cancel()
         with self.assertRaises(asyncio.CancelledError):
             await task
-        self.assertTrue(manager._automatic_decisions_paused)
+        self.assertTrue(manager._decision_service.paused)
         self.assertEqual(Records.get_pending_decision_count(), 1)
         self.assertIsNone(Records.get_bili_binding(888))
 

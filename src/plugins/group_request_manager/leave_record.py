@@ -9,6 +9,8 @@ from typing import Optional
 
 from pydantic import BaseModel
 
+from src.gatekeeper.formatters import format_leave_time
+
 from .database import database_connection
 
 logger = logging.getLogger("group_request_manager.leave_record")
@@ -31,16 +33,7 @@ class LeaveRecordManager:
     @classmethod
     def format_leave_time(cls, leave_time: str) -> str:
         """将存量 ISO 时间统一转成更适合聊天展示的格式。"""
-        if not leave_time:
-            return ""
-        normalized = leave_time.strip()
-        for candidate in (normalized, normalized.replace("T", " ")):
-            try:
-                dt = datetime.fromisoformat(candidate)
-                return dt.strftime("%Y-%m-%d %H:%M:%S")
-            except ValueError:
-                continue
-        return normalized.replace("T", " ")
+        return format_leave_time(leave_time)
 
     @classmethod
     def _record_from_row(cls, row) -> LeaveRecord:

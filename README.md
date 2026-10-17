@@ -82,21 +82,40 @@ bilibili-qq-group-gatekeeper/
 ├── data/
 │   ├── records/
 │   └── runtime/
-└── src/plugins/group_request_manager/
-    ├── __init__.py
-    ├── async_storage.py
-    ├── bili_api.py
-    ├── bili_runtime.py
-    ├── config.py
-    ├── cookie_manager.py
-    ├── database.py
-    ├── formatters.py
-    ├── leave_record.py
-    ├── request_record.py
-    ├── user_report.py
-    ├── webui.py
-    └── main.py
+└── src/
+    ├── gatekeeper/                ← 可独立导入的审核与审批核心
+    │   ├── models.py
+    │   ├── config.py
+    │   ├── conditions.py
+    │   ├── pipeline.py
+    │   ├── decisions.py
+    │   ├── decision_runtime.py
+    │   ├── parsing.py
+    │   └── formatters.py
+    └── plugins/group_request_manager/
+        ├── __init__.py
+        ├── async_storage.py
+        ├── bili_api.py
+        ├── bili_runtime.py
+        ├── config.py
+        ├── cookie_manager.py
+        ├── database.py
+        ├── decision_adapter.py
+        ├── decision_runtime.py
+        ├── formatters.py
+        ├── leave_record.py
+        ├── request_record.py
+        ├── user_report.py
+        ├── webui.py
+        └── main.py
 ```
+
+`src/gatekeeper/` 提供 T/F/I 条件计算、分组路由、审核轨迹和持久审批服务，
+可以在无需初始化 NoneBot 的情况下测试。插件负责事件转换、命令注册与外部接口，
+并注入 SQLite 存储、审批动作和通知。领域术语见 [CONTEXT.md](CONTEXT.md)，
+架构边界见 [ADR 0002](docs/adr/0002-framework-independent-core.md)。
+
+独立核心测试：`uv run python -m unittest discover -s tests -p 'test_core_*.py'`。
 
 ## Linux 部署
 
