@@ -39,10 +39,11 @@ SEARCH_FALLBACK_URL = "https://api.bilibili.com/x/web-interface/search/type"
 NAV_URL = "https://api.bilibili.com/x/web-interface/nav"
 UID_PROFILE_URL = "https://api.bilibili.com/x/web-interface/card"
 
-NICKNAME_NOT_FOUND_MESSAGE = "未搜索到你填写的B站昵称，请检查昵称是否填写正确，或填写正确的UID后重新申请"
-UID_NOT_FOUND_MESSAGE = "未查到你填写的B站UID，请检查UID是否填写正确后重新申请"
-UID_INVALID_MESSAGE = "你填写的B站UID格式有误，请检查并填写正确的纯数字UID后重新申请"
-ACCOUNT_REQUIRED_MESSAGE = "未填写B站账号，请检查并填写正确的UID或昵称后重新申请"
+ACCOUNT_INPUT_GUIDANCE = "请不要填写B站昵称或UID以外的内容"
+NICKNAME_NOT_FOUND_MESSAGE = "未搜索到你填写的B站昵称，请检查昵称是否填写正确，或填写正确的UID后重新申请。" + ACCOUNT_INPUT_GUIDANCE
+UID_NOT_FOUND_MESSAGE = "未查到你填写的B站UID，请检查UID是否填写正确后重新申请。" + ACCOUNT_INPUT_GUIDANCE
+UID_INVALID_MESSAGE = "你填写的B站UID格式有误，请检查并填写正确的纯数字UID后重新申请。" + ACCOUNT_INPUT_GUIDANCE
+ACCOUNT_REQUIRED_MESSAGE = "未填写B站账号，请检查并填写正确的UID或昵称后重新申请。" + ACCOUNT_INPUT_GUIDANCE
 # 搜索结果分页不完整时不能断定“昵称不存在”，只能按无法判断处理
 SEARCH_INCOMPLETE_MESSAGE = "B站搜索结果不完整，无法确认是否存在该昵称"
 

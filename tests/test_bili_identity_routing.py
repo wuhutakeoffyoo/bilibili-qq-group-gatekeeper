@@ -204,6 +204,7 @@ class JoinRequestRoutingSmokeTests(unittest.IsolatedAsyncioTestCase):
                 self.assertFalse(call["approve"])
                 self.assertIn(expected, call["reason"])
                 self.assertIn("检查", call["reason"])
+                self.assertIn("请不要填写B站昵称或UID以外的内容", call["reason"])
                 self.assertIn("阶段自定义拒绝提示", call["reason"])
                 self.assertTrue(call["reason"].startswith("来自BOT:"))
                 self.assertEqual((audit.result, audit.action_status), ("rejected", "applied"))
@@ -226,7 +227,8 @@ class JoinRequestRoutingSmokeTests(unittest.IsolatedAsyncioTestCase):
         reason = bot.set_group_add_request.await_args.kwargs["reason"]
         self.assertIn("未查到你填写的B站UID", reason)
         self.assertIn("检查", reason)
-        self.assertNotIn("昵称", reason)
+        self.assertIn("请不要填写B站昵称或UID以外的内容", reason)
+        self.assertNotIn("未搜索到你填写的B站昵称", reason)
         self.assertNotIn(LEGACY_NICKNAME_NOT_FOUND_MESSAGE, audit.condition_reasons["bili_account"])
 
     async def test_check_command_keeps_uid_value_after_a_space_and_never_writes_audit(self):
