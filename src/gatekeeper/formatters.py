@@ -8,17 +8,17 @@ from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from .config import GroupConfig
-    from .models import StageRuntime
+    from .models import RuleConditionStatus, StageRuntime
 
 
 CONDITION_CN_NAMES = {
-    "bili_account": "B站账号可搜索",
+    "bili_account": "B站账号确认",
     "bili_level": "B站等级",
     "qq_level": "QQ等级",
     "follow": "关注",
     "medal": "粉丝牌",
     "no_leave_record": "无退群记录",
-    "no_conflict": "无冒用",
+    "no_conflict": "B站账号归属校验",
     "no_identity_change": "不更换B站账号",
 }
 
@@ -197,10 +197,49 @@ def format_group_config(group_config: GroupConfig) -> str:
     )
 
 
+def build_stage_reject_reasons(
+    stage: StageRuntime,
+    outcome: str,
+    statuses: dict[str, RuleConditionStatus],
+    reasons: list[str],
+) -> list[str]:
+    """Explain the rejecting stage without hiding observations behind custom text."""
+    result = list(dict.fromkeys(reason.strip() for reason in reasons if reason.strip()))
+    for condition in stage.conditions:
+        status = statuses.get(condition)
+        if status is None or status.state != outcome or outcome not in {"false", "unknown"}:
+            continue
+        detail = status.reason.strip() or (
+            "暂无法核验该项条件，请稍后重试或联系管理员" if outcome == "unknown"
+            else "未满足本群要求，请联系管理员核实"
+        )
+        if not any(detail in reason for reason in result):
+            result.append(f"{CONDITION_CN_NAMES.get(condition, condition)}：{detail}")
+    if outcome == "unknown" and stage.conditions:
+        result.append(f"本次未能完成“{stage.name or '审核阶段'}”的核验，按本群规则暂不接受申请；请稍后重试或联系管理员")
+    elif outcome == "true":
+        matched = "、".join(
+            CONDITION_CN_NAMES.get(name, name) for name in stage.conditions
+            if name in statuses and statuses[name].state == "true"
+        )
+        result.append(f"已命中本群“{stage.name or '审核阶段'}”的拒绝规则（已满足条件：{matched or '本阶段条件'}）；如需复核，请联系管理员")
+    return result or ["本次申请未满足本群入群规则，请联系管理员核实具体原因"]
+
+
+def format_uid_restriction_reason(configured_reason: str) -> str:
+    detail = configured_reason.strip()
+    parts = ["该B站账号命中本群限制名单，暂不能加入"]
+    if detail:
+        parts.append(f"管理员说明：{detail}")
+    parts.append("如需复核，请联系管理员")
+    return "；".join(parts)
+
+
 def build_reject_reason(reasons: list[str]) -> str:
-    """将多条拒绝原因拼成适合返回给申请者的短文本。"""
-    text = "；".join(reason for reason in reasons if reason)[:120]
-    return f"来自BOT:{text}" if text else "来自BOT"
+    """Send complete explanations; never silently cut a cause or correction hint."""
+    unique = dict.fromkeys(reason.strip() for reason in reasons if reason.strip())
+    text = "；".join(unique) or "本次申请未满足本群入群规则，请联系管理员核实具体原因"
+    return f"来自BOT:{text}"
 
 
 def format_stage_trace(

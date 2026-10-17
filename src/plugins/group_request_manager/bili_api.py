@@ -335,7 +335,7 @@ class BiliApi:
             )
             return CheckResult(
                 "failed",
-                "搜索到多个同名B站账号，无法唯一确定你填写的B站昵称",
+                "搜索到多个同名B站账号，无法唯一确定账号，请检查昵称或填写正确的UID后重新申请。" + ACCOUNT_INPUT_GUIDANCE,
             )
 
         selected_user = exact_matches[0]

@@ -262,12 +262,12 @@ groups:
             conflict_qq=None,
             owned_other_bili_uids=[],
         )
-        self.assertEqual(statuses["qq_level"].reason, "自定义QQ拒绝原因")
+        self.assertIn("自定义QQ拒绝原因", statuses["qq_level"].reason)
+        self.assertIn("当前3级，本群要求至少4级", statuses["qq_level"].reason)
         self.assertEqual(statuses["bili_level"].state, "false")
-        self.assertEqual(
-            statuses["follow"].reason,
-            "你没有关注主播,本群为粉丝群,禁止非粉丝加入,若你确定已经关注了主播,请检查你填写的b站昵称是否正确",
-        )
+        self.assertIn("未检测到该B站账号关注指定主播", statuses["follow"].reason)
+        self.assertIn("UID：200000003", statuses["follow"].reason)
+        self.assertIn("请关注后重新申请", statuses["follow"].reason)
         self.assertEqual(_build_reject_reason(["测试原因"]), "来自BOT:测试原因")
 
     def test_bili_level_reason_explains_search_failure(self):
@@ -331,7 +331,7 @@ groups:
         self.assertEqual(statuses["follow"].state, "unknown")
         self.assertEqual(
             statuses["follow"].reason,
-            "共同关注不可见或无法读取；关注列表仅能读取 100/156 项，按配置忽略",
+            "暂无法确认关注状态：共同关注不可见或无法读取；关注列表仅能读取 100/156 项；请稍后重试或联系管理员",
         )
 
     def test_bili_flow_exception_preserves_successful_search_result(self):
@@ -369,7 +369,7 @@ groups:
             condition_lines,
             [
                 "通过：",
-                "  - B站账号可搜索",
+                "  - B站账号确认",
                 "未通过：",
                 "  - 粉丝牌",
                 "    原因：未持有灯牌",
@@ -966,7 +966,8 @@ class QQLevelTests(unittest.IsolatedAsyncioTestCase):
             owned_other_bili_uids=[],
         )
         self.assertEqual(statuses["qq_level"].state, "false")
-        self.assertEqual(statuses["qq_level"].reason, "你的Q等级过低,疑似机器人账号")
+        self.assertIn("当前0级，本群要求至少4级", statuses["qq_level"].reason)
+        self.assertNotIn("疑似机器人", statuses["qq_level"].reason)
 
     async def test_hidden_zero_from_stranger_info_is_unknown(self):
         bot = SimpleNamespace(
@@ -992,7 +993,9 @@ class QQLevelTests(unittest.IsolatedAsyncioTestCase):
             owned_other_bili_uids=[],
         )
         self.assertEqual(statuses["qq_level"].state, "unknown")
-        self.assertEqual(statuses["qq_level"].reason, "无法读取 QQ 等级，按配置忽略")
+        self.assertIn("暂无法读取你的QQ等级", statuses["qq_level"].reason)
+        self.assertIn("至少4级", statuses["qq_level"].reason)
+        self.assertIn("请稍后重试或联系管理员", statuses["qq_level"].reason)
 
     async def test_event_level_can_fallback_when_stranger_level_is_hidden(self):
         bot = SimpleNamespace(
@@ -1319,10 +1322,9 @@ class BiliSearchTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(result.state, "failed")
         self.assertIsNone(result.matched_target_uid)
-        self.assertEqual(
-            result.detail,
-            "搜索到多个同名B站账号，无法唯一确定你填写的B站昵称",
-        )
+        self.assertIn("搜索到多个同名B站账号", result.detail)
+        self.assertIn("请检查昵称或填写正确的UID", result.detail)
+        self.assertIn("请不要填写B站昵称或UID以外的内容", result.detail)
 
 
 class BiliFollowTests(unittest.IsolatedAsyncioTestCase):
@@ -1627,7 +1629,9 @@ class BiliMedalTests(unittest.IsolatedAsyncioTestCase):
         )
 
         self.assertEqual(statuses["medal"].state, "unknown")
-        self.assertIn("无法读取", statuses["medal"].reason)
+        self.assertIn("暂无法确认粉丝牌或等级", statuses["medal"].reason)
+        self.assertIn("灯牌墙已关闭", statuses["medal"].reason)
+        self.assertIn("请稍后重试或联系管理员", statuses["medal"].reason)
 
 
 class LocalLoggingPolicyTests(unittest.IsolatedAsyncioTestCase):

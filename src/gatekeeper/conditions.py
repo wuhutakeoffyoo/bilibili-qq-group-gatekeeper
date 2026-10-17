@@ -5,6 +5,13 @@ from .formatters import format_leave_time
 from .models import CheckResult, LeaveRecordLike, RuleConditionStatus
 
 LEGACY_NICKNAME_NOT_FOUND_MESSAGE = "未搜索到你填写的B站昵称，请不要输入与b站昵称无关的字段并检查你的昵称是否输入有误"
+LEGACY_REJECT_REASONS = {
+    "bili_account": {LEGACY_NICKNAME_NOT_FOUND_MESSAGE},
+    "bili_level": {"你的B站等级过低,疑似机器人账号"},
+    "qq_level": {"你的Q等级过低,疑似机器人账号", "你的QQ等级过低,疑似机器人账号"},
+    "follow": {"你没有关注主播,本群为粉丝群,禁止非粉丝加入,若你确定已经关注了主播,请检查你填写的b站昵称是否正确"},
+    "no_leave_record": {"检测到退群记录", "命中退群记录"},
+}
 
 
 def build_condition_snapshot(
@@ -28,11 +35,11 @@ def requires_bili_identity(rule_conditions: set[str]) -> bool:
 
 
 def configured_reject_reason(group_config: GroupConfig, condition: str, default: str) -> str:
-    """返回条件专属拒绝原因，允许在群配置中覆盖。"""
-    reason = group_config.reject_reasons.get(condition, default)
-    if condition == "bili_account" and reason == LEGACY_NICKNAME_NOT_FOUND_MESSAGE:
+    """Preserve custom explanations without hiding observed facts or requirements."""
+    reason = group_config.reject_reasons.get(condition, "").strip()
+    if not reason or reason in LEGACY_REJECT_REASONS.get(condition, set()):
         return default
-    return reason
+    return reason if default in reason else f"{reason}；{default}"
 
 
 def build_rule_condition_statuses(
@@ -88,14 +95,19 @@ def build_rule_condition_statuses(
         else:
             statuses["bili_level"] = RuleConditionStatus(
                 "false",
-                configured_reject_reason(group_config, "bili_level", "你的B站等级过低,疑似机器人账号"),
+                configured_reject_reason(
+                    group_config, "bili_level",
+                    f"B站等级不足：当前{bili_level}级，本群要求至少{group_config.required_bili_level}级；请达到要求后重新申请",
+                ),
             )
 
     if "qq_level" in rule_conditions:
         if group_config.required_qq_level <= 0:
             statuses["qq_level"] = RuleConditionStatus("unknown", "规则引用了 qq_level，但未配置有效的 QQ 最低等级")
         elif qq_level is None:
-            statuses["qq_level"] = RuleConditionStatus("unknown", "无法读取 QQ 等级，按配置忽略")
+            statuses["qq_level"] = RuleConditionStatus(
+                "unknown", f"暂无法读取你的QQ等级，无法确认是否达到本群要求（至少{group_config.required_qq_level}级），请稍后重试或联系管理员"
+            )
         elif qq_level >= group_config.required_qq_level:
             statuses["qq_level"] = RuleConditionStatus("true")
         else:
@@ -104,7 +116,7 @@ def build_rule_condition_statuses(
                 configured_reject_reason(
                     group_config,
                     "qq_level",
-                    f"QQ等级不足（当前 {qq_level} 级，要求至少 {group_config.required_qq_level} 级）",
+                    f"QQ等级不足：当前{qq_level}级，本群要求至少{group_config.required_qq_level}级；请达到要求后重新申请",
                 ),
             )
 
@@ -119,12 +131,14 @@ def build_rule_condition_statuses(
                 configured_reject_reason(
                     group_config,
                     "follow",
-                    "你没有关注主播,本群为粉丝群,禁止非粉丝加入,若你确定已经关注了主播,请检查你填写的b站昵称是否正确",
+                    "未检测到该B站账号关注指定主播（UID："
+                    + "、".join(str(uid) for uid in group_config.target_uids)
+                    + "，关注任一位即可）；请关注后重新申请，如确认已关注请核对所填UID或昵称",
                 ),
             )
         else:
             detail = follow_result.detail.strip() or "关注列表不可见或无法读取"
-            statuses["follow"] = RuleConditionStatus("unknown", f"{detail}，按配置忽略")
+            statuses["follow"] = RuleConditionStatus("unknown", f"暂无法确认关注状态：{detail}；请稍后重试或联系管理员")
 
     if "medal" in rule_conditions:
         if not group_config.target_medal_uids:
@@ -132,9 +146,18 @@ def build_rule_condition_statuses(
         elif medal_result.state == "passed":
             statuses["medal"] = RuleConditionStatus("true")
         elif medal_result.state == "failed":
-            statuses["medal"] = RuleConditionStatus("false", "未满足粉丝牌条件")
+            statuses["medal"] = RuleConditionStatus(
+                "false",
+                configured_reject_reason(
+                    group_config, "medal",
+                    "粉丝牌未达到要求：目标主播UID为"
+                    + "、".join(str(uid) for uid in group_config.target_medal_uids)
+                    + f"，持有任一位的粉丝牌且至少{group_config.required_medal_level}级即可；请核对账号和粉丝牌，满足要求后再申请",
+                ),
+            )
         else:
-            statuses["medal"] = RuleConditionStatus("unknown", "粉丝牌列表不可见或无法读取，按配置忽略")
+            detail = medal_result.detail.strip() or "粉丝牌列表不可见或无法读取"
+            statuses["medal"] = RuleConditionStatus("unknown", f"暂无法确认粉丝牌或等级：{detail}；请稍后重试或联系管理员")
 
     if "no_leave_record" in rule_conditions:
         if not leave_record_known:
@@ -142,10 +165,11 @@ def build_rule_condition_statuses(
         elif leave_record is None:
             statuses["no_leave_record"] = RuleConditionStatus("true")
         else:
-            reason = "命中退群记录"
+            reason = "检测到你在本群的退群记录，未满足本群入群要求；如需重新加入，请联系管理员核实"
             if group_config.reject_reason_with_leave_time:
                 formatted_leave_time = format_leave_time(leave_record.leave_time)
-                reason = f"您曾于 {formatted_leave_time} 退群"
+                if formatted_leave_time:
+                    reason = f"你曾于{formatted_leave_time}退出本群，未满足本群入群要求；如需重新加入，请联系管理员核实"
             reason = configured_reject_reason(group_config, "no_leave_record", reason)
             statuses["no_leave_record"] = RuleConditionStatus("false", reason)
 
@@ -158,10 +182,15 @@ def build_rule_condition_statuses(
     if "no_conflict" in rule_conditions:
         if not (identity_binding_known and bili_identity_known and conflict_lookup_known):
             statuses["no_conflict"] = RuleConditionStatus(
-                "unknown", "B站身份或绑定记录未能确认，无法判断是否存在账号冒用"
+                "unknown", "暂无法确认该B站账号与QQ的绑定关系，请稍后重试或联系管理员核实"
             )
         elif conflict_qq:
-            statuses["no_conflict"] = RuleConditionStatus("false", "该 B站账号已被其他 QQ 绑定，疑似冒用")
+            statuses["no_conflict"] = RuleConditionStatus(
+                "false", configured_reject_reason(
+                    group_config, "no_conflict",
+                    "该B站账号已与另一个QQ绑定，无法用于当前QQ申请；请核对你本人的UID或昵称，如绑定有误请联系管理员核实",
+                )
+            )
         else:
             statuses["no_conflict"] = RuleConditionStatus("true")
 
@@ -174,7 +203,10 @@ def build_rule_condition_statuses(
             joined_uids = "、".join(str(uid) for uid in owned_other_bili_uids)
             statuses["no_identity_change"] = RuleConditionStatus(
                 "false",
-                f"该 QQ 已绑定其他 B站 UID：{joined_uids}，如需改绑请先使用 /解除绑定 <QQ号>",
+                configured_reject_reason(
+                    group_config, "no_identity_change",
+                    f"当前QQ已绑定B站UID：{joined_uids}，与本次填写的UID不一致；请使用原绑定账号，或联系管理员核实解绑后再申请",
+                ),
             )
         else:
             statuses["no_identity_change"] = RuleConditionStatus("true")
