@@ -10,12 +10,13 @@ import hashlib
 import logging
 import secrets
 import time
-from dataclasses import dataclass
 from http.cookies import CookieError, SimpleCookie
 from typing import Optional
 from urllib.parse import quote
 
 import httpx
+
+from src.gatekeeper.models import CheckResult
 
 # 请求头模拟浏览器，避免被反爬
 HEADERS = {
@@ -107,16 +108,6 @@ def create_bili_http_client(
             max_keepalive_connections=max_keepalive_connections,
         ),
     )
-
-
-@dataclass
-class CheckResult:
-    """单项校验结果。"""
-
-    state: str
-    detail: str = ""
-    matched_target_uid: Optional[int] = None
-    matched_level: Optional[int] = None
 
 
 class BiliApi:

@@ -8,7 +8,6 @@
 import asyncio
 import itertools
 import os
-import re
 import shlex
 import shutil
 from dataclasses import dataclass, field
@@ -25,6 +24,38 @@ from nonebot.adapters.onebot.v11 import (
 from nonebot.adapters.onebot.v11.exception import ActionFailed
 from nonebot.params import CommandArg
 
+from src.gatekeeper.conditions import (
+    build_condition_snapshot as _build_condition_snapshot,
+    build_rule_condition_statuses as _build_rule_condition_statuses,
+    requires_bili_identity as _requires_bili_identity,
+)
+from src.gatekeeper.decisions import DecisionRequest, DecisionService, DefiniteActionFailure
+from src.gatekeeper.formatters import (
+    build_reject_reason as _build_reject_reason,
+    format_action_text as _format_action_text,
+    format_flow_action_text as _format_flow_action_text,
+    format_group_config as _format_group_config,
+    format_stage_pipeline_text as _format_stage_pipeline_text,  # noqa: F401 - compatibility export
+)
+from src.gatekeeper.models import (
+    RuleConditionStatus,
+    StageDispatchResult,
+    StageExecutionResult,
+    StageRuntime,
+)
+from src.gatekeeper.parsing import (
+    extract_bili_name as _extract_bili_name,
+    parse_qq_level as _parse_qq_level,
+)
+from src.gatekeeper.pipeline import (
+    collect_pipeline_conditions as _collect_pipeline_conditions,
+    get_review_stages as _get_review_stages,
+    get_stage_flow_action as _get_stage_flow_action,
+    get_stage_outcome_actions as _get_stage_outcome_actions,
+    get_stage_outcome_target as _get_stage_outcome_target,
+    iter_pipeline,
+)
+
 from .bili_api import BiliApi, CheckResult
 from .bili_runtime import BiliRequestCoordinator
 from .async_storage import run_storage
@@ -38,9 +69,9 @@ from .config import (
 from .cookie_manager import CookieManager
 from . import cookie_monitor, email_notifier
 from .database import initialize_database
-from .decision_runtime import DecisionLocks, identity_decision_keys
+from .decision_adapter import SqliteDecisionStorage, configure_decision_logging
+from .decision_runtime import identity_decision_keys
 from .formatters import (
-    CONDITION_CN_NAMES,
     format_condition_details as _format_condition_details,
     format_stage_results as _format_stage_results,
 )
@@ -106,39 +137,12 @@ _disk_monitor_task: asyncio.Task | None = None
 _cookie_monitor_task: asyncio.Task | None = None
 _webui_server = None
 _bili_requests = BiliRequestCoordinator(max_concurrent=4, total_timeout=60.0)
-_automatic_decisions_paused = False
-_decision_locks = DecisionLocks()
+configure_decision_logging()
+_decision_service = DecisionService(SqliteDecisionStorage())
 _disk_alert_email_state = {
     "current_level": None,
     "email_sent_for_current_alert": False,
 }
-
-
-@dataclass
-class RuleConditionStatus:
-    """单个规则条件的求值结果。"""
-
-    state: str
-    reason: str = ""
-
-
-@dataclass
-class StageRuntime:
-    """编译后的单个审核阶段。"""
-
-    index: int
-    name: str
-    conditions: list[str]
-    mode: str
-    on_true: list[str]
-    on_false: list[str]
-    on_unknown: list[str]
-    on_true_target: int | None = None
-    on_false_target: int | None = None
-    on_unknown_target: int | None = None
-    on_true_reason: str = ""
-    on_false_reason: str = ""
-    on_unknown_reason: str = ""
 
 
 @dataclass
@@ -172,65 +176,10 @@ class JoinRequestContext:
     stage_results: list[str] = field(default_factory=list)
 
 
-@dataclass
-class StageDispatchResult:
-    """阶段动作执行后的结果。"""
-
-    flow_action: str
-    target_stage_index: int | None = None
-
-
-@dataclass
-class StageExecutionResult:
-    """单个或整条审核管线执行后的结果。"""
-
-    stage: StageRuntime
-    outcome: str
-    actions: list[str]
-    reasons: list[str]
-    dispatch_result: StageDispatchResult
-
-
-def _format_bool_text(value: bool) -> str:
-    """将布尔值格式化为更易读的中文文本。"""
-    return "开启" if value else "关闭"
-
-
-def _format_action_text(value: str) -> str:
-    """将动作配置格式化为中文文本。"""
-    return {
-        "approve": "同意",
-        "reject": "拒绝",
-        "ignore": "忽略",
-    }.get(value, value or "未设置")
-
-
-def _format_flow_action_text(flow_action: str, target_stage_index: int | None = None) -> str:
-    """将阶段流转动作格式化为带跳转信息的文本。"""
-    if flow_action != "next":
-        return flow_action
-    if target_stage_index is None:
-        return "next(顺序下一个分组)"
-    return f"next(分组{target_stage_index})"
-
-
 def _is_valid_qq(value: object) -> bool:
     """判断配置值是否是可用于 OneBot 的纯数字 QQ 号。"""
     text = str(value).strip()
     return text.isdigit()
-
-
-def _build_condition_snapshot(
-    condition_statuses: dict[str, RuleConditionStatus],
-) -> tuple[dict[str, str], dict[str, str]]:
-    """将条件求值结果压缩成适合审计持久化的快照。"""
-    states: dict[str, str] = {}
-    reasons: dict[str, str] = {}
-    for name, status in condition_statuses.items():
-        states[name] = status.state
-        if status.reason:
-            reasons[name] = status.reason
-    return states, reasons
 
 
 ACTION_HANDLERS: dict[str, object] = {}
@@ -334,248 +283,6 @@ async def _action_log_warn(
     )
 
 
-def _evaluate_stage_conditions(
-    stage: StageRuntime, condition_statuses: dict[str, RuleConditionStatus]
-) -> str:
-    """按分组模式汇总 T/F/I，不解析任何布尔表达式。"""
-    states = [condition_statuses[name].state for name in stage.conditions]
-    if stage.mode == "all_pass":
-        if "false" in states:
-            return "false"
-        if "unknown" in states:
-            return "unknown"
-        return "true"
-    if "true" in states:
-        return "true"
-    if "unknown" in states:
-        return "unknown"
-    return "false"
-
-
-def _build_stage_runtime(
-    *,
-    index: int,
-    name: str,
-    conditions: list[str],
-    mode: str,
-    on_true: list[str],
-    on_false: list[str],
-    on_unknown: list[str],
-    on_true_target: int | None = None,
-    on_false_target: int | None = None,
-    on_unknown_target: int | None = None,
-    on_true_reason: str = "",
-    on_false_reason: str = "",
-    on_unknown_reason: str = "",
-) -> StageRuntime:
-    """编译单个审核阶段。"""
-    return StageRuntime(
-        index=index,
-        name=name or f"阶段{index}",
-        conditions=list(conditions),
-        mode=mode,
-        on_true=on_true,
-        on_false=on_false,
-        on_unknown=on_unknown,
-        on_true_target=on_true_target,
-        on_false_target=on_false_target,
-        on_unknown_target=on_unknown_target,
-        on_true_reason=on_true_reason,
-        on_false_reason=on_false_reason,
-        on_unknown_reason=on_unknown_reason,
-    )
-
-
-def _validate_stage_routing(stages: list[StageRuntime]) -> None:
-    """校验分组编号与跳转目标是否合法。"""
-    indexes = [stage.index for stage in stages]
-    if len(indexes) != len(set(indexes)):
-        raise ValueError("审核分组编号不能重复")
-
-    existing_indexes = set(indexes)
-    for stage in stages:
-        for branch_name, target in (
-            ("on_true", stage.on_true_target),
-            ("on_false", stage.on_false_target),
-            ("on_unknown", stage.on_unknown_target),
-        ):
-            if target is None:
-                continue
-            if target == stage.index:
-                raise ValueError(f"阶段 {stage.index} 的 {branch_name}_target 不能指向自己")
-            if target not in existing_indexes:
-                raise ValueError(f"阶段 {stage.index} 的 {branch_name}_target 指向不存在的分组 {target}")
-
-
-def _get_review_stages(group_config: GroupConfig) -> list[StageRuntime]:
-    """获取当前群的审核分组；审核逻辑必须由分组管道提供。"""
-    if not group_config.review_stages:
-        raise ValueError("未配置审核分组管道 review_pipeline_file")
-    runtimes = [
-        _build_stage_runtime(
-            index=stage.index,
-            name=stage.name,
-            conditions=stage.conditions,
-            mode=stage.mode,
-            on_true=stage.on_true,
-            on_false=stage.on_false,
-            on_unknown=stage.on_unknown,
-            on_true_target=stage.on_true_target,
-            on_false_target=stage.on_false_target,
-            on_unknown_target=stage.on_unknown_target,
-            on_true_reason=stage.on_true_reason,
-            on_false_reason=stage.on_false_reason,
-            on_unknown_reason=stage.on_unknown_reason,
-        )
-        for stage in sorted(group_config.review_stages, key=lambda item: item.index)
-    ]
-    _validate_stage_routing(runtimes)
-    return runtimes
-
-
-def _format_stage_pipeline_text(group_config: GroupConfig) -> str:
-    """将阶段化审核配置格式化为便于查看的文本。"""
-    if not group_config.review_stages:
-        return "未配置审核分组管道"
-
-    lines: list[str] = []
-    for stage in sorted(group_config.review_stages, key=lambda item: item.index):
-        condition_text = "、".join(
-            CONDITION_CN_NAMES.get(name, name) for name in stage.conditions
-        )
-        mode_text = "全部通过" if stage.mode == "all_pass" else "任一通过"
-        if lines:
-            lines.append("")
-        lines.extend(
-            [
-                f"{stage.index}. {stage.name or f'阶段{stage.index}'}",
-                f"   规则：{mode_text}（{condition_text}）",
-                f"   通过：{_format_branch_action_display(stage.on_true, stage.on_true_target)}",
-                f"   未通过：{_format_branch_action_display(stage.on_false, stage.on_false_target)}",
-                f"   无法判断：{_format_branch_action_display(stage.on_unknown, stage.on_unknown_target)}",
-            ]
-        )
-    return "\n".join(lines)
-
-
-def _collect_pipeline_conditions(stages: list[StageRuntime]) -> set[str]:
-    """收集整个审核管线中用到的条件。"""
-    conditions: set[str] = set()
-    for stage in stages:
-        conditions.update(stage.conditions)
-    return conditions
-
-
-def _get_stage_outcome_actions(stage: StageRuntime, outcome: str) -> list[str]:
-    """获取阶段某个结果对应的动作列表。"""
-    if outcome == "true":
-        return stage.on_true
-    if outcome == "false":
-        return stage.on_false
-    return stage.on_unknown
-
-
-def _get_stage_outcome_target(stage: StageRuntime, outcome: str) -> int | None:
-    """获取阶段某个结果对应的跳转目标。"""
-    if outcome == "true":
-        return stage.on_true_target
-    if outcome == "false":
-        return stage.on_false_target
-    return stage.on_unknown_target
-
-
-def _format_branch_action_text(actions: list[str], target_stage_index: int | None) -> str:
-    """将动作列表格式化为便于阅读的分支文本。"""
-    rendered: list[str] = []
-    for action in actions:
-        if action in {"next", "approve", "reject", "ignore"}:
-            rendered.append(_format_flow_action_text(action, target_stage_index))
-        else:
-            rendered.append(action)
-    return ",".join(rendered)
-
-
-def _format_branch_action_display(actions: list[str], target_stage_index: int | None) -> str:
-    """将配置中的流程动作转成面向管理员的中文说明。"""
-    labels: list[str] = []
-    for action in actions:
-        if action == "next":
-            labels.append(
-                f"进入筛选组 {target_stage_index}"
-                if target_stage_index is not None
-                else "进入下一筛选组"
-            )
-        else:
-            labels.append(
-                {
-                    "approve": "通过申请",
-                    "reject": "拒绝申请",
-                    "ignore": "忽略申请",
-                }.get(action, action)
-            )
-    return "、".join(labels) or "无动作"
-
-
-def _get_stage_flow_action(actions: list[str]) -> str:
-    """从阶段动作列表中解析流转动作。"""
-    for action in actions:
-        if action in {"next", "approve", "reject", "ignore"}:
-            return action
-    raise ValueError("阶段动作缺少流转动作")
-
-
-def _get_next_stage_index(stages: list[StageRuntime], current_stage_index: int) -> int | None:
-    """获取顺序模式下的下一个分组编号。"""
-    for stage in stages:
-        if stage.index > current_stage_index:
-            return stage.index
-    return None
-
-
-def _resolve_stage_reasons(
-    stage: StageRuntime,
-    outcome: str,
-    referenced_statuses: list[RuleConditionStatus],
-) -> list[str]:
-    """生成阶段结果对应的原因列表。"""
-    override_reason = {
-        "true": stage.on_true_reason,
-        "false": stage.on_false_reason,
-        "unknown": stage.on_unknown_reason,
-    }.get(outcome, "")
-    if override_reason:
-        return [override_reason]
-
-    if outcome == "false":
-        reasons = [status.reason for status in referenced_statuses if status.state == "false" and status.reason]
-        return reasons or ["未满足阶段规则"]
-
-    if outcome == "unknown":
-        reasons = [
-            status.reason for status in referenced_statuses if status.state == "unknown" and status.reason
-        ]
-        return reasons or ["阶段所需条件暂时无法完整判断"]
-
-    return [f"通过阶段：{stage.name}"]
-
-
-def _append_stage_trace(
-    context: JoinRequestContext,
-    stage: StageRuntime,
-    outcome: str,
-    actions: list[str],
-    reasons: list[str],
-) -> None:
-    """记录阶段执行轨迹。"""
-    outcome_cn = {"true": "通过", "false": "未通过", "unknown": "无法判断"}.get(outcome, outcome)
-    action_text = _format_branch_action_text(actions, _get_stage_outcome_target(stage, outcome)) or "无动作"
-    reason_text = "；".join(reasons) or "无"
-    condition_text = ",".join(stage.conditions)
-    context.stage_results.append(
-        f"{stage.name} | {stage.mode}[{condition_text}] | {outcome_cn} | {action_text} | {reason_text}"
-    )
-
-
 async def _dispatch_stage_actions(
     context: JoinRequestContext,
     stage: StageRuntime,
@@ -596,262 +303,25 @@ async def _dispatch_stage_actions(
     return result
 
 
-async def _execute_stage(
-    context: JoinRequestContext,
-    stage: StageRuntime,
-) -> StageExecutionResult:
-    """执行单个审核阶段，并返回阶段结果。"""
-    referenced_statuses = [
-        context.condition_statuses[name]
-        for name in stage.conditions
-        if name in context.condition_statuses
-    ]
-    outcome = _evaluate_stage_conditions(stage, context.condition_statuses)
-    reasons = _resolve_stage_reasons(stage, outcome, referenced_statuses)
-    actions = _get_stage_outcome_actions(stage, outcome)
-    _append_stage_trace(context, stage, outcome, actions, reasons)
-    dispatch_result = await _dispatch_stage_actions(context, stage, outcome, reasons)
-    return StageExecutionResult(
-        stage=stage,
-        outcome=outcome,
-        actions=actions,
-        reasons=reasons,
-        dispatch_result=dispatch_result,
-    )
-
-
 async def _run_stage_pipeline(
     context: JoinRequestContext,
     stages: list[StageRuntime],
 ) -> StageExecutionResult:
-    """执行整个审核管线，支持按结果跳转到指定分组。"""
-    if not stages:
-        raise ValueError("审核分组不能为空")
-
-    sorted_stages = sorted(stages, key=lambda item: item.index)
-    stage_map = {stage.index: stage for stage in sorted_stages}
-    current_stage_index = sorted_stages[0].index
-    visited_indexes: set[int] = set()
-
+    """执行纯规则核心生成的步骤，并按原有顺序发送阶段副作用。"""
+    steps = iter_pipeline(stages, context.condition_statuses)
+    dispatch = None
     while True:
-        if current_stage_index in visited_indexes:
-            raise ValueError(f"审核分组跳转形成循环，重复进入分组 {current_stage_index}")
-        visited_indexes.add(current_stage_index)
-
-        current_stage = stage_map.get(current_stage_index)
-        if current_stage is None:
-            raise ValueError(f"审核分组跳转到不存在的分组 {current_stage_index}")
-
-        execution = await _execute_stage(context, current_stage)
-        if execution.dispatch_result.flow_action != "next":
-            return execution
-
-        next_stage_index = execution.dispatch_result.target_stage_index
-        if next_stage_index is None:
-            next_stage_index = _get_next_stage_index(sorted_stages, current_stage.index)
-
-        if next_stage_index is None:
-            if execution.outcome != "true":
-                raise ValueError(
-                    f"阶段 {current_stage.index} 的 {execution.outcome} 分支配置为 next，"
-                    "但不存在下一个分组"
-                )
-            fallback_reasons = ["全部审核分组均已放行"]
-            fallback_actions = ["approve"]
-            _append_stage_trace(context, current_stage, "true", fallback_actions, fallback_reasons)
-            return StageExecutionResult(
-                stage=current_stage,
-                outcome="true",
-                actions=fallback_actions,
-                reasons=fallback_reasons,
-                dispatch_result=StageDispatchResult(flow_action="approve"),
+        try:
+            step = steps.send(dispatch)
+        except StopIteration as completed:
+            return completed.value
+        context.stage_results.append(step.trace)
+        dispatch = None
+        if step.dispatch_actions:
+            execution = step.execution
+            dispatch = await _dispatch_stage_actions(
+                context, execution.stage, execution.outcome, execution.reasons
             )
-
-        current_stage_index = next_stage_index
-
-
-def _requires_bili_identity(rule_conditions: set[str]) -> bool:
-    """判断规则是否依赖 B站身份信息。"""
-    return bool(
-        rule_conditions
-        & {"bili_account", "bili_level", "follow", "medal", "no_conflict", "no_identity_change"}
-    )
-
-
-def _configured_reject_reason(
-    group_config: GroupConfig, condition: str, default: str
-) -> str:
-    """返回条件专属拒绝原因，允许在群配置中覆盖。"""
-    return group_config.reject_reasons.get(condition, default)
-
-
-def _build_rule_condition_statuses(
-    group_config: GroupConfig,
-    rule_conditions: set[str],
-    *,
-    qq_level: int | None,
-    bili_search_result: CheckResult,
-    bili_level: int | None,
-    follow_result: CheckResult,
-    medal_result: CheckResult,
-    leave_record,
-    conflict_qq: str | None,
-    owned_other_bili_uids: list[int],
-    leave_record_known: bool = True,
-    identity_binding_known: bool = True,
-    conflict_lookup_known: bool = False,
-    identity_change_lookup_known: bool = False,
-) -> dict[str, RuleConditionStatus]:
-    """基于各项检查结果生成分组管道所需的条件状态。"""
-    statuses: dict[str, RuleConditionStatus] = {}
-
-    if "bili_account" in rule_conditions:
-        if bili_search_result.state == "passed":
-            statuses["bili_account"] = RuleConditionStatus("true")
-        elif bili_search_result.state == "failed":
-            statuses["bili_account"] = RuleConditionStatus(
-                "false",
-                _configured_reject_reason(
-                    group_config,
-                    "bili_account",
-                    "未搜索到你填写的B站昵称，请不要输入与b站昵称无关的字段并检查你的昵称是否输入有误",
-                ),
-            )
-        else:
-            statuses["bili_account"] = RuleConditionStatus(
-                "unknown", bili_search_result.detail or "B站账号搜索暂时不可用"
-            )
-
-    if "bili_level" in rule_conditions:
-        if group_config.required_bili_level <= 0:
-            statuses["bili_level"] = RuleConditionStatus(
-                "unknown", "规则引用了 bili_level，但未配置有效的 B站最低等级"
-            )
-        elif bili_search_result.state != "passed" or bili_level is None:
-            if bili_search_result.state == "failed":
-                reason = "未搜索到B站账号，无法读取 B站等级"
-            elif bili_search_result.state == "inaccessible":
-                reason = f"{bili_search_result.detail or 'B站账号搜索暂时不可用'}，无法读取 B站等级"
-            else:
-                reason = "无法读取 B站等级"
-            statuses["bili_level"] = RuleConditionStatus("unknown", reason)
-        elif bili_level >= group_config.required_bili_level:
-            statuses["bili_level"] = RuleConditionStatus("true")
-        else:
-            statuses["bili_level"] = RuleConditionStatus(
-                "false",
-                _configured_reject_reason(
-                    group_config, "bili_level", "你的B站等级过低,疑似机器人账号"
-                ),
-            )
-
-    if "qq_level" in rule_conditions:
-        if group_config.required_qq_level <= 0:
-            statuses["qq_level"] = RuleConditionStatus(
-                "unknown", "规则引用了 qq_level，但未配置有效的 QQ 最低等级"
-            )
-        elif qq_level is None:
-            statuses["qq_level"] = RuleConditionStatus(
-                "unknown", "无法读取 QQ 等级，按配置忽略"
-            )
-        elif qq_level >= group_config.required_qq_level:
-            statuses["qq_level"] = RuleConditionStatus("true")
-        else:
-            statuses["qq_level"] = RuleConditionStatus(
-                "false",
-                _configured_reject_reason(
-                    group_config,
-                    "qq_level",
-                    f"QQ等级不足（当前 {qq_level} 级，要求至少 {group_config.required_qq_level} 级）",
-                ),
-            )
-
-    if "follow" in rule_conditions:
-        if not group_config.target_uids:
-            statuses["follow"] = RuleConditionStatus(
-                "unknown", "规则引用了 follow，但未配置关注目标 UID"
-            )
-        elif follow_result.state == "passed":
-            statuses["follow"] = RuleConditionStatus("true")
-        elif follow_result.state == "failed":
-            statuses["follow"] = RuleConditionStatus(
-                "false",
-                _configured_reject_reason(
-                    group_config,
-                    "follow",
-                    "你没有关注主播,本群为粉丝群,禁止非粉丝加入,若你确定已经关注了主播,请检查你填写的b站昵称是否正确",
-                ),
-            )
-        else:
-            detail = follow_result.detail.strip() or "关注列表不可见或无法读取"
-            statuses["follow"] = RuleConditionStatus(
-                "unknown", f"{detail}，按配置忽略"
-            )
-
-    if "medal" in rule_conditions:
-        if not group_config.target_medal_uids:
-            statuses["medal"] = RuleConditionStatus(
-                "unknown", "规则引用了 medal，但未配置粉丝牌目标 UID"
-            )
-        elif medal_result.state == "passed":
-            statuses["medal"] = RuleConditionStatus("true")
-        elif medal_result.state == "failed":
-            statuses["medal"] = RuleConditionStatus("false", "未满足粉丝牌条件")
-        else:
-            statuses["medal"] = RuleConditionStatus(
-                "unknown", "粉丝牌列表不可见或无法读取，按配置忽略"
-            )
-
-    if "no_leave_record" in rule_conditions:
-        if not leave_record_known:
-            statuses["no_leave_record"] = RuleConditionStatus(
-                "unknown", "未提供 QQ，无法判断是否存在退群记录"
-            )
-        elif leave_record is None:
-            statuses["no_leave_record"] = RuleConditionStatus("true")
-        else:
-            reason = "命中退群记录"
-            if group_config.reject_reason_with_leave_time:
-                formatted_leave_time = LeaveRecordManager.format_leave_time(
-                    leave_record.leave_time
-                )
-                reason = f"您曾于 {formatted_leave_time} 退群"
-            reason = _configured_reject_reason(group_config, "no_leave_record", reason)
-            statuses["no_leave_record"] = RuleConditionStatus("false", reason)
-
-    bili_identity_known = (
-        bili_search_result.state == "passed"
-        and isinstance(bili_search_result.matched_target_uid, int)
-        and bili_search_result.matched_target_uid > 0
-    )
-
-    if "no_conflict" in rule_conditions:
-        if not (identity_binding_known and bili_identity_known and conflict_lookup_known):
-            statuses["no_conflict"] = RuleConditionStatus(
-                "unknown", "B站身份或绑定记录未能确认，无法判断是否存在账号冒用"
-            )
-        elif conflict_qq:
-            statuses["no_conflict"] = RuleConditionStatus(
-                "false", "该 B站账号已被其他 QQ 绑定，疑似冒用"
-            )
-        else:
-            statuses["no_conflict"] = RuleConditionStatus("true")
-
-    if "no_identity_change" in rule_conditions:
-        if not (identity_binding_known and bili_identity_known and identity_change_lookup_known):
-            statuses["no_identity_change"] = RuleConditionStatus(
-                "unknown", "B站身份或绑定记录未能确认，无法判断是否存在改绑记录"
-            )
-        elif owned_other_bili_uids:
-            joined_uids = "、".join(str(uid) for uid in owned_other_bili_uids)
-            statuses["no_identity_change"] = RuleConditionStatus(
-                "false",
-                f"该 QQ 已绑定其他 B站 UID：{joined_uids}，如需改绑请先使用 /解除绑定 <QQ号>",
-            )
-        else:
-            statuses["no_identity_change"] = RuleConditionStatus("true")
-
-    return statuses
 
 
 def _build_audit_kwargs_from_context(
@@ -1016,31 +486,6 @@ def _is_private_superadmin_event(event: MessageEvent) -> bool:
     )
 
 
-def _format_group_config(group_config: GroupConfig) -> str:
-    """将单个群配置格式化为适合聊天窗口阅读的文本。"""
-    target_uids = "、".join(str(uid) for uid in group_config.target_uids) or "未设置"
-    target_medal_uids = "、".join(str(uid) for uid in group_config.target_medal_uids) or "未设置"
-    return "\n".join(
-        [
-            f"【群配置 {group_config.group_id}】",
-            "",
-            "基础设置",
-            f"启用状态：{_format_bool_text(group_config.enabled)}",
-            f"QQ最低等级：{group_config.required_qq_level}",
-            f"B站最低等级：{group_config.required_bili_level}",
-            "",
-            "目标设置",
-            f"关注目标 UID：{target_uids}",
-            f"粉丝牌目标 UID：{target_medal_uids}",
-            f"粉丝牌最低等级：{group_config.required_medal_level}",
-            f"拒绝时附带退群时间：{_format_bool_text(group_config.reject_reason_with_leave_time)}",
-            "",
-            "审核流程",
-            _format_stage_pipeline_text(group_config),
-        ]
-    )
-
-
 def _get_cookiecloud_config() -> tuple[str, str, str]:
     """统一读取 CookieCloud 配置。"""
     driver_config = get_driver().config
@@ -1050,58 +495,10 @@ def _get_cookiecloud_config() -> tuple[str, str, str]:
     return str(host).strip(), str(uuid).strip(), str(key).strip()
 
 
-def _build_reject_reason(reasons: list[str]) -> str:
-    """将多条拒绝原因拼成适合返回给申请者的短文本。"""
-    text = "；".join(reason for reason in reasons if reason)[:120]
-    return f"来自BOT:{text}" if text else "来自BOT"
-
-
 def _mark_bili_flow_exception(context: JoinRequestContext, detail: str = "B站 API 流程异常") -> None:
     """标记 B站流程异常，但保留异常前已经成功拿到的搜索结果。"""
     if context.bili_search_result.state == "not_required":
         context.bili_search_result = CheckResult("inaccessible", detail)
-
-
-def _extract_bili_name(raw_comment: str) -> str:
-    """从加群申请 comment 中提取 B站昵称。
-
-    QQ 群如果开启了加群验证问题，NapCat 传回的 comment 格式为：
-      问题：自己b站id+主播名称
-      答案：Nyako_WW
-    此时只取"答案："后面的部分；如果没有 Q&A 格式，直接用原值。
-    """
-    text = raw_comment.strip()
-    if not text:
-        return ""
-    for line in reversed(text.splitlines()):
-        line = line.strip()
-        for prefix in ("答案：", "答案:", "answer：", "answer:"):
-            if line.startswith(prefix):
-                return line.removeprefix(prefix).strip()
-    # 无 Q&A 格式 → 直接返回原值
-    return text
-
-
-def _parse_qq_level(raw_value: object) -> int | None:
-    """从 NapCat 返回值中提取 QQ 等级数字。
-
-    不同 OneBot 实现返回的 level 字段格式可能不同：
-    - 纯数字 int（如 32）
-    - 带文字前缀的字符串（如 "Lv32"、"等级32"）
-    这里统一用正则提取第一个连续数字作为等级值。
-    字段明确返回 0 时代表有效的 0 级；字段缺失、空值或负数才视为不可读取。
-    """
-    if raw_value in ("", None):
-        return None
-    if isinstance(raw_value, bool):
-        return None
-    if isinstance(raw_value, int):
-        return raw_value if raw_value >= 0 else None
-    match = re.search(r"-?\d+", str(raw_value))
-    if not match:
-        return None
-    level = int(match.group(0))
-    return level if level >= 0 else None
 
 
 def _is_qq_level_hidden(payload: dict) -> bool:
@@ -1194,141 +591,32 @@ async def _set_group_request_with_durable_audit(
     reason: str = "",
     audit_kwargs: dict,
 ) -> bool:
-    """Persist intent, execute OneBot action, then finalize the durable audit."""
-    event_flag = str(event.flag).strip()
-    request_key = (
-        ":".join(
-            (
-                str(getattr(bot, "self_id", "")),
-                str(audit_kwargs.get("group_id", "")),
-                str(event.sub_type),
-                event_flag,
-            )
-        )
-        if event_flag
-        else ""
+    """把 OneBot 请求和明确失败转换为独立审批服务的输入。"""
+    request = DecisionRequest(
+        bot_id=str(getattr(bot, "self_id", "")),
+        group_id=str(audit_kwargs.get("group_id", "")),
+        sub_type=str(event.sub_type),
+        flag=str(event.flag),
     )
-    async with _decision_locks.hold(f"request:{request_key}" if request_key else ""):
-        return await _execute_group_request_decision(
-            bot, event, approve=approve, reason=reason,
-            audit_kwargs=audit_kwargs, request_key=request_key,
-        )
 
-
-async def _execute_group_request_decision(
-    bot: Bot,
-    event: GroupRequestEvent,
-    *,
-    approve: bool,
-    reason: str,
-    audit_kwargs: dict,
-    request_key: str,
-) -> bool:
-    """Execute a decision while concurrent copies of its request are waiting."""
-    global _automatic_decisions_paused
-    if _automatic_decisions_paused:
-        paused_kwargs = dict(audit_kwargs)
-        paused_kwargs["result"] = "ignored"
-        paused_kwargs["reasons"] = ["存在尚未人工确认的历史审批，自动审批已暂停"]
-        paused_audit = await run_storage(
-            JoinRequestRecordManager.add_audit, **paused_kwargs
-        )
-        if paused_audit is None:
-            logger.critical("自动审批暂停期间的忽略审计写入失败")
-        await _notify_admins(
-            bot,
-            "自动审批已暂停：存在尚未确认的历史审批。请使用 /待确认审批 查看。",
-        )
-        return False
-
-    pending_audit = await run_storage(
-        JoinRequestRecordManager.begin_pending_decision,
-        **audit_kwargs,
-        request_key=request_key,
-    )
-    if pending_audit is None or pending_audit.id is None:
-        _automatic_decisions_paused = True
-        logger.critical("审批前置审计写入失败，已停止执行 QQ 审批动作")
-        await _notify_admins(
-            bot,
-            f"严重：QQ {audit_kwargs.get('qq', '未知')} 的审批前置审计写入失败，已安全地停止自动审批。",
-        )
-        return False
-
-    if not getattr(pending_audit, "was_created", True):
-        if pending_audit.action_status == "applied":
-            logger.info("忽略已完成的重复加群请求：request_key=%s", request_key)
-            return True
-        if pending_audit.action_status == "pending":
-            _automatic_decisions_paused = True
-            await _notify_admins(
-                bot,
-                f"检测到重复的未确认审批 #{pending_audit.id}，已暂停自动审批，请人工核对。",
-            )
-        else:
-            logger.warning(
-                "忽略已终止的重复加群请求：request_key=%s, status=%s",
-                request_key,
-                pending_audit.action_status,
-            )
-        return False
-
-    try:
-        kwargs = {
-            "flag": event.flag,
-            "sub_type": event.sub_type,
-            "approve": approve,
-        }
+    async def perform_action() -> None:
+        kwargs = {"flag": event.flag, "sub_type": event.sub_type, "approve": approve}
         if reason:
             kwargs["reason"] = reason
-        await bot.set_group_add_request(**kwargs)
-    except ActionFailed as exc:
-        logger.exception("调用加群审批接口失败")
-        failure_reason = (
-            "调用加群审批接口失败，申请保持未处理状态："
-            f"{type(exc).__name__}"
-        )
-        finalized = await run_storage(
-            JoinRequestRecordManager.finalize_pending_decision,
-            pending_audit.id,
-            applied=False,
-            failure_reason=failure_reason,
-        )
-        if not finalized:
-            _automatic_decisions_paused = True
-            await _notify_admins(
-                bot,
-                f"严重：审批接口失败后无法更新审计 #{pending_audit.id}，请检查 SQLite。",
-            )
-        return False
-    except asyncio.CancelledError:
-        _automatic_decisions_paused = True
-        logger.warning("审批调用被取消，审计 #{} 保留待确认状态", pending_audit.id)
-        raise
-    except Exception as exc:
-        _automatic_decisions_paused = True
-        logger.exception("审批结果无法确认，保留 pending 审计并暂停自动审批")
-        await _notify_admins(
-            bot,
-            f"审批 #{pending_audit.id} 结果无法确认（{type(exc).__name__}）。"
-            "自动审批已暂停，请核对 QQ 群的实际结果，再使用 /确认审批 处理。",
-        )
-        return False
+        try:
+            await bot.set_group_add_request(**kwargs)
+        except ActionFailed as exc:
+            raise DefiniteActionFailure(type(exc).__name__) from exc
 
-    finalized = await run_storage(
-        JoinRequestRecordManager.finalize_pending_decision,
-        pending_audit.id,
-        applied=True,
+    async def notify(message: str) -> None:
+        await _notify_admins(bot, message)
+
+    return await _decision_service.execute(
+        request,
+        audit_kwargs=audit_kwargs,
+        perform_action=perform_action,
+        notify=notify,
     )
-    if not finalized:
-        _automatic_decisions_paused = True
-        logger.critical("QQ 审批已执行，但审计状态确认失败：id=%s", pending_audit.id)
-        await _notify_admins(
-            bot,
-            f"严重：QQ 审批已执行，但审计 #{pending_audit.id} 仍未确认。请勿重复审批，并检查 SQLite。",
-        )
-        return False
-    return True
 
 
 def _reset_disk_alert_email_state() -> None:
@@ -1528,20 +816,9 @@ def _format_help_text() -> str:
 async def _start_background_tasks() -> None:
     """启动磁盘监控、Cookie 监控和可选 WebUI。"""
     global _disk_monitor_task, _cookie_monitor_task, _webui_server
-    global _automatic_decisions_paused
     await run_storage(initialize_database)
     logger.success("SQLite 业务记录数据库初始化完成")
-    pending_count = await run_storage(
-        JoinRequestRecordManager.get_pending_decision_count
-    )
-    if pending_count:
-        _automatic_decisions_paused = True
-        logger.critical(
-            "检测到 %s 条尚未确认的审批审计，请在执行新审批前人工核对",
-            pending_count,
-        )
-    else:
-        _automatic_decisions_paused = False
+    await _decision_service.restore_pending()
     _disk_monitor_task = asyncio.create_task(_disk_space_monitor())
     _cookie_monitor_task = asyncio.create_task(cookie_monitor.cookie_monitor_loop())
     config = ConfigManager.get_config()
@@ -1785,7 +1062,7 @@ async def _review_request_with_identity_guard(
     pipeline_conditions: set[str],
 ) -> None:
     """Keep identity reads and their resulting audit/approval in one critical section."""
-    async with _decision_locks.hold(*identity_decision_keys(context.user_id, context.bili_uid)):
+    async with _decision_service.locks.hold(*identity_decision_keys(context.user_id, context.bili_uid)):
         try:
             await _populate_identity_bindings(context, pipeline_conditions)
         except Exception:
@@ -2206,7 +1483,6 @@ async def handle_resolve_pending_decision(
     event: MessageEvent, arg: Message = CommandArg()
 ) -> None:
     """命令：/确认审批 <审计ID> <applied|failed>。"""
-    global _automatic_decisions_paused
     if not _is_private_superadmin_event(event):
         return
     parts = str(arg).strip().split()
@@ -2219,23 +1495,13 @@ async def handle_resolve_pending_decision(
     if resolution not in {"applied", "failed"}:
         await resolve_pending_decision.finish("确认结果只能是 applied 或 failed")
 
-    pending = await run_storage(JoinRequestRecordManager.get_pending_decisions, 1000)
-    audit = next((audit for audit in pending if audit.id == audit_id), None)
-    if audit is None:
+    result = await _decision_service.resolve_pending(audit_id, applied=resolution == "applied")
+    if not result.found:
         await resolve_pending_decision.finish(f"审计 {audit_id} 不存在或已经确认")
-    async with _decision_locks.hold(*identity_decision_keys(audit.qq, audit.bili_uid)):
-        finalized = await run_storage(
-            JoinRequestRecordManager.finalize_pending_decision,
-            audit_id,
-            applied=resolution == "applied",
-            failure_reason="超级管理员确认 QQ 审批未生效",
-        )
-    if not finalized:
+    if not result.finalized:
         await resolve_pending_decision.finish(f"审计 {audit_id} 确认失败，请检查 SQLite")
-    remaining = await run_storage(JoinRequestRecordManager.get_pending_decision_count)
-    _automatic_decisions_paused = remaining > 0
     await resolve_pending_decision.finish(
-        f"审计 {audit_id} 已标记为 {resolution}；剩余待确认：{remaining}"
+        f"审计 {audit_id} 已标记为 {resolution}；剩余待确认：{result.remaining}"
     )
 
 
@@ -2249,7 +1515,7 @@ async def handle_clear_identity_binding(event: MessageEvent, arg: Message = Comm
     if not qq:
         await clear_identity_binding.finish("用法：/解除绑定 <QQ号>")
 
-    async with _decision_locks.hold(*identity_decision_keys(qq, None)):
+    async with _decision_service.locks.hold(*identity_decision_keys(qq, None)):
         had_binding = (
             await run_storage(JoinRequestRecordManager.get_user_binding, qq)
         ) is not None

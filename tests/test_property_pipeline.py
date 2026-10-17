@@ -2,20 +2,12 @@
 
 import unittest
 
-import nonebot
-
-nonebot.init()
-
 from hypothesis import given, settings
 from hypothesis import strategies as st
 
-from src.plugins.group_request_manager.main import (
-    RuleConditionStatus,
-    StageRuntime,
-    _evaluate_stage_conditions,
-    _extract_bili_name,
-    _parse_qq_level,
-)
+from src.gatekeeper.models import RuleConditionStatus, StageRuntime
+from src.gatekeeper.parsing import extract_bili_name, parse_qq_level
+from src.gatekeeper.pipeline import evaluate_stage_conditions
 
 # 纯函数用例，关闭单例耗时上限以适配 CI 慢节点
 settings.register_profile("gatekeeper", max_examples=50, deadline=None)
@@ -35,9 +27,7 @@ def _no_line_breaks(value: str) -> bool:
 
 def _make_stage(states, mode):
     names = [f"condition_{index}" for index in range(len(states))]
-    statuses = {
-        name: RuleConditionStatus(state=state) for name, state in zip(names, states)
-    }
+    statuses = {name: RuleConditionStatus(state=state) for name, state in zip(names, states)}
     stage = StageRuntime(
         index=1,
         name="测试分组",
@@ -54,7 +44,7 @@ class EvaluateStageConditionProperties(unittest.TestCase):
     @given(states=st.lists(STATES, max_size=10))
     def test_all_pass_mode_priority(self, states):
         stage, statuses = _make_stage(states, "all_pass")
-        outcome = _evaluate_stage_conditions(stage, statuses)
+        outcome = evaluate_stage_conditions(stage, statuses)
         self.assertIn(outcome, {"true", "false", "unknown"})
         if "false" in states:
             self.assertEqual(outcome, "false")
@@ -66,7 +56,7 @@ class EvaluateStageConditionProperties(unittest.TestCase):
     @given(states=st.lists(STATES, max_size=10))
     def test_any_pass_mode_priority(self, states):
         stage, statuses = _make_stage(states, "any_pass")
-        outcome = _evaluate_stage_conditions(stage, statuses)
+        outcome = evaluate_stage_conditions(stage, statuses)
         self.assertIn(outcome, {"true", "false", "unknown"})
         if "true" in states:
             self.assertEqual(outcome, "true")
@@ -80,7 +70,7 @@ class EvaluateStageConditionProperties(unittest.TestCase):
         """业务红线：存在无法判断的条件时，任何汇总模式都不允许直接给出 true。"""
         for mode in ("all_pass", "any_pass"):
             stage, statuses = _make_stage(states, mode)
-            outcome = _evaluate_stage_conditions(stage, statuses)
+            outcome = evaluate_stage_conditions(stage, statuses)
             if "unknown" in states and "true" not in states:
                 self.assertNotEqual(outcome, "true")
 
@@ -88,49 +78,57 @@ class EvaluateStageConditionProperties(unittest.TestCase):
 class ParseQqLevelProperties(unittest.TestCase):
     @given(st.integers(min_value=0))
     def test_non_negative_int_kept(self, value):
-        self.assertEqual(_parse_qq_level(value), value)
+        self.assertEqual(parse_qq_level(value), value)
 
     @given(st.integers(max_value=-1))
     def test_negative_int_unreadable(self, value):
-        self.assertIsNone(_parse_qq_level(value))
+        self.assertIsNone(parse_qq_level(value))
 
     @given(st.integers(max_value=-1))
     def test_negative_number_in_string_unreadable(self, value):
-        self.assertIsNone(_parse_qq_level(str(value)))
+        self.assertIsNone(parse_qq_level(str(value)))
 
     @given(st.booleans())
     def test_bool_unreadable(self, value):
-        self.assertIsNone(_parse_qq_level(value))
+        self.assertIsNone(parse_qq_level(value))
 
-    @given(
-        st.text(max_size=20).filter(
-            lambda value: not any(char.isdigit() for char in value)
-        )
-    )
+    @given(st.text(max_size=20).filter(lambda value: not any(char.isdigit() for char in value)))
     def test_digit_free_text_unreadable(self, value):
-        self.assertIsNone(_parse_qq_level(value))
+        self.assertIsNone(parse_qq_level(value))
 
     @given(
         prefix=st.sampled_from(["", "Lv", "等级", "lv.", "QQ"]),
         level=st.integers(min_value=0, max_value=256),
     )
     def test_level_number_extracted(self, prefix, level):
-        self.assertEqual(_parse_qq_level(f"{prefix}{level}"), level)
+        self.assertEqual(parse_qq_level(f"{prefix}{level}"), level)
 
 
 class ExtractBiliNameProperties(unittest.TestCase):
     @given(
         st.text(max_size=30).filter(
-            lambda value: _no_line_breaks(value)
-            and not any(value.startswith(prefix) for prefix in ANSWER_PREFIXES)
+            lambda value: _no_line_breaks(value) and not any(value.startswith(prefix) for prefix in ANSWER_PREFIXES)
         )
     )
     def test_answer_line_value_extracted(self, value):
-        self.assertEqual(_extract_bili_name(f"问题：xxx\n答案：{value}"), value.strip())
+        self.assertEqual(extract_bili_name(f"问题：xxx\n答案：{value}"), value.strip())
 
-    @given(st.text(max_size=30).filter(_no_line_breaks))
+    @given(
+        prefix=st.sampled_from(ANSWER_PREFIXES),
+        value=st.text(max_size=30).filter(_no_line_breaks),
+    )
+    def test_single_answer_line_value_extracted(self, prefix, value):
+        self.assertEqual(extract_bili_name(f" {prefix}{value} "), value.strip())
+
+    @given(
+        st.text(max_size=30).filter(
+            lambda value: (
+                _no_line_breaks(value) and not any(value.strip().startswith(prefix) for prefix in ANSWER_PREFIXES)
+            )
+        )
+    )
     def test_plain_comment_returned_stripped(self, value):
-        self.assertEqual(_extract_bili_name(value), value.strip())
+        self.assertEqual(extract_bili_name(value), value.strip())
 
 
 if __name__ == "__main__":
