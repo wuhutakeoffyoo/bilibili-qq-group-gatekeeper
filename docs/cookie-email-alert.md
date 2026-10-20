@@ -1,28 +1,72 @@
 # 异常状态邮件告警
 
-Bot 会在启动后检查 B站 Cookie，之后按固定周期调用 B站 `nav` 接口验证登录状态；磁盘空间监控也会复用同一套邮箱配置发送告警。
+Bot 启动后会延迟检查 B站 Cookie，之后按周期调用 nav 验证登录状态。磁盘监控复用同一套 SMTP 配置。当前使用 SMTP over SSL，不支持用本页配置切换为 STARTTLS。
 
-- `code=-101` 或 `code=0` 且 `isLogin=false`：确认 Cookie 已失效并发送邮件。
-- 网络超时、连接失败或其他 B站业务错误：发送“Cookie 检查异常”邮件，但不误报 Cookie 过期。
-- 日志目录所在磁盘空间低于阈值：发送“磁盘告警”邮件，同时仍会私聊超级管理员。
-- 同一种异常成功发送后会去重；发送失败会在下一周期重试。状态恢复正常后，再次异常可重新告警。
+## 告警行为
 
-## 配置
+- `code=-101` 或 `code=0` 且 `isLogin=false`：确认 Cookie 失效。
+- 网络超时、连接失败或其他 B站业务错误：报告“Cookie 检查异常”，不当作 Cookie 过期。
+- 剩余磁盘空间低于 1 GB/0.2 GB：警告/严重；取得 Bot 后也私聊超级管理员。磁盘读取失败会尝试邮件。
+- 同类异常成功发信后去重，失败后在下一周期重试。恢复正常后再次异常可重新发送；去重状态仅在进程内，重启后可重新告警。
+- 未配置 Cookie 时跳过过期告警；SMTP 缺少必填项时不发送邮件。
+- 邮件失败不会触发自动清理或自动拒绝申请。
 
-在部署环境的私有 `.env.prod` 中配置：
+## 注入进程环境
 
-```dotenv
-COOKIE_CHECK_INTERVAL_SECONDS=3600
-NOTIFY_SMTP_HOST="smtp.example.com"
-NOTIFY_SMTP_PORT="465"
-NOTIFY_SMTP_USER="sender@example.com"
-NOTIFY_SMTP_PASSWORD="SMTP授权码"
-NOTIFY_FROM_ADDR="sender@example.com"
-NOTIFY_TO_ADDR="recipient@example.com"
+`email_notifier.py` 和 Cookie 周期使用 `os.getenv`。**这些值必须存在于 Bot 进程环境；只写入由 NoneBot 解析的 `.env.prod` 不会自动导出。** 程序也不会主动读取个人的 `mail_config.json`。
+
+Linux 交互启动可在同一终端设置：
+
+```bash
+export COOKIE_CHECK_INTERVAL_SECONDS=3600
+export NOTIFY_SMTP_HOST="smtp.example.com"
+export NOTIFY_SMTP_PORT=465
+export NOTIFY_SMTP_USER="sender@example.com"
+export NOTIFY_SMTP_PASSWORD="your-smtp-authorization-code"
+export NOTIFY_FROM_ADDR="sender@example.com"
+export NOTIFY_TO_ADDR="recipient@example.com"
+uv run --locked python bot.py
 ```
 
-当前实现使用 SMTP over SSL，通常对应端口 `465`。检查周期允许 `60` 到 `86400` 秒。
+示例地址和授权码需要替换为自己的私有配置。Windows 可用同名 `$env:变量名` 在启动终端注入；只在另一个终端设置无效。
 
-不要将真实 Cookie、邮箱密码或 SMTP 授权码提交到 Git。个人环境可从全局 `mail.md`/`mail_config.json` 将对应字段映射到上述环境变量；开源部署者只需使用自己的 SMTP 配置。
+## systemd 注入
 
-Cookie 失效后，可由超级管理员私聊 Bot 执行 `/设置cookie` 提供新的 Cookie。已配置 CookieCloud 时，还可使用 `/获取cookie` 同步；CookieCloud 仅提供可选支持。
+首次创建服务专用私有文件：
+
+```bash
+sudo install -d -m 700 /etc/bili-group-gatekeeper
+if ! sudo test -e /etc/bili-group-gatekeeper/notify.env; then
+    sudo install -m 600 /dev/null /etc/bili-group-gatekeeper/notify.env
+fi
+sudoedit /etc/bili-group-gatekeeper/notify.env
+sudo systemctl edit bili-group-gatekeeper.service
+```
+
+内容使用 `KEY=value`，逐行填写上节的七个变量，不写 `export`。drop-in 中加入：
+
+```ini
+[Service]
+EnvironmentFile=/etc/bili-group-gatekeeper/notify.env
+```
+
+然后加载配置并重启：
+
+```bash
+sudo systemctl daemon-reload
+sudo systemctl restart bili-group-gatekeeper.service
+```
+
+备份应包含该环境文件和 drop-in。不要把整个 `.env.prod` 直接当作 systemd 环境文件：其内容格式和 NoneBot 解析规则未必一致。
+
+## 默认值与检查
+
+| 字段 | 规则 |
+| --- | --- |
+| `COOKIE_CHECK_INTERVAL_SECONDS` | 默认 3600 秒；整数限制在 60–86400，解析失败用默认值 |
+| `NOTIFY_SMTP_PORT` | 默认 465；非法端口回退 465 |
+| 其他五个 SMTP/地址字段 | 均需非空，任一缺少则跳过发送 |
+
+确认启动日志显示期望检查周期；真正发信需核对收件箱。模拟 SMTP 测试不能证明实际邮件已送达。不要输出密码、Cookie 或授权码，不要提交 Git。
+
+Cookie 失效后由超级管理员用 `/设置cookie` 提供新值；已配置可选 CookieCloud 时可用 `/获取cookie`。若环境中仍有旧 `BILI_COOKIE`，须同步更新或清空，见[配置来源](configuration.md#cookie-与其他全局配置)。

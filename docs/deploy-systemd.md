@@ -1,32 +1,29 @@
-# 使用 systemd 部署（替代 setsid 手工启动）
+# 使用 systemd 部署与升级
 
-项目现名为 **Bilibili QQ Group Gatekeeper**。为避免升级时意外启动两个审核进程，现有 `bili-group-gatekeeper.service` 单元名暂时保留；改名不要求改动已部署的 `/opt/bili-group-gatekeeper` 目录。新部署若使用新的仓库目录名，务必在复制服务文件后同步修改 `WorkingDirectory=`、`ExecStart=` 和下文凭据文件路径。不要同时启用旧、新两个服务单元。
+支持单个 Bot 进程。兼容保留 `bili-group-gatekeeper.service` 单元名；目录可按部署环境选择，但不能因更名另起第二个审核实例。以下示例默认目录为 `/opt/bili-group-gatekeeper`，实际环境以服务配置为准。
 
-## 为什么改
+## 首次配置服务
 
-历史上生产环境用 `setsid .venv/bin/python bot.py > bot.out 2> bot.err` 启动，有两个已知问题：
+先完成 [README 安装步骤](../README.md#linux-部署)：创建虚拟环境、环境文件、真实群 YAML、审核流程及 Cookie。仓库的示例群默认关闭，不能直接当作生产配置。
 
-1. **进程挂了没人拉起**：Python 崩溃、机器重启后需要人工发现并手动重启，群审核在此期间静默停摆。
-2. **进程在 ≠ 服务正常**：2026-08-25 曾发生 NapCat 假在线——Python 进程存在、TCP 已连接，但收不到任何新消息，只能靠人工发现。systemd 至少解决第 1 点；第 2 点需要配合监控和实际消息验证（见下文"健康检查"）。
-
-## 部署步骤
-
-1. 停掉旧的 `setsid` 实例，**确认只有一个实例在跑**（双实例会造成重复审批、重复发消息）：
+1. 确认运行用户存在，且拥有程序、配置、数据库和日志目录的读写权限。若使用模板的 `gatekeeper` 用户且尚不存在，可创建：
 
    ```bash
-   ps aux | grep "bot.py"
-   # 找到旧进程后 kill <PID>，并确认 bot.out 不再增长
+   id gatekeeper || sudo useradd --system --home-dir /opt/bili-group-gatekeeper --shell /usr/sbin/nologin gatekeeper
    ```
 
-2. 复制服务单元文件并按需修改运行用户、目录和 Python 路径：
+2. 停止原来的手工实例，核对命令行和工作目录后再结束对应 PID。其他 Bot 进程不要一起停止；确认只有一个审核实例。
+
+3. 从仓库根目录复制服务模板：
 
    ```bash
    sudo cp deploy/bili-group-gatekeeper.service /etc/systemd/system/
    sudoedit /etc/systemd/system/bili-group-gatekeeper.service
-   # 核对：User=、WorkingDirectory=、ExecStart=；保留 UMask=0077
    ```
 
-3. 收紧已有凭据文件的权限（路径及用户按服务单元的 `User=` 调整）：
+   核对 `User=`、`WorkingDirectory=` 和 `ExecStart=` 的实际路径，保留 `UMask=0077`。`ExecStart` 使用该目录的虚拟环境 Python，且工作目录内具备 `.env`、`.env.prod`。
+
+4. 收紧已有凭据权限。以下路径和用户应与服务保持一致：
 
    ```bash
    sudo chown gatekeeper:gatekeeper /opt/bili-group-gatekeeper/.env.prod
@@ -37,32 +34,74 @@
    fi
    ```
 
-4. 启动并设置开机自启：
+   SQLite、命令覆盖、私有 YAML 和服务环境文件也应仅由运行账号及管理员读取。复制后核对属主，避免新版本数据库不可写。
+
+5. 如需邮件或自定义 Cookie 检查周期，按[邮件文档](cookie-email-alert.md)添加独立 `EnvironmentFile=`。NoneBot 读取 `.env.prod` 不会把内容全部导出到进程环境。
+
+6. 校验并启动：
 
    ```bash
+   sudo systemd-analyze verify /etc/systemd/system/bili-group-gatekeeper.service
    sudo systemctl daemon-reload
-   sudo systemctl enable --now bili-group-gatekeeper
+   sudo systemctl enable --now bili-group-gatekeeper.service
+   systemctl show bili-group-gatekeeper.service --property=ActiveState,SubState,MainPID,NRestarts,WorkingDirectory
    ```
 
-## 日常操作
+## 日常检查
 
 ```bash
-systemctl status bili-group-gatekeeper   # 看是否 active
-journalctl -u bili-group-gatekeeper -f   # 跟踪实时输出
-sudo systemctl restart bili-group-gatekeeper
+systemctl status bili-group-gatekeeper.service
+journalctl -u bili-group-gatekeeper.service -f
+sudo systemctl restart bili-group-gatekeeper.service
 ```
 
-## 升级版本时的流程
+`Restart=on-failure` 在进程退出后重启；`KillSignal=SIGINT` 和停止超时用于优雅结束。它们不能发现“进程在、TCP 已连接但不收事件”的 NapCat 假在线。
 
-1. 备份 `data/records/gatekeeper.sqlite3`（停 Bot 后复制整个 data 目录，或使用在线备份接口；运行中只复制 `.sqlite3` 会漏掉 WAL）。
-2. 拉取代码、`uv sync --locked`。
-3. `sudo systemctl restart bili-group-gatekeeper`。
-4. 验证：发送一条测试命令确认 Bot 收发正常、查看日志确认加载了预期的群配置（尤其是 `GROUP_CONFIG_FILE` 指向的实际群 YAML，而非根目录示例）。
+## 升级与全量迁移
 
-## 健康检查（systemd 覆盖不到的部分）
+### 找出真实配置
 
-`Restart=on-failure` 只在**进程退出**时拉起。像 NapCat 假在线这种"进程活着但收不到消息"的情况，systemd 无感知，仍需要：
+先查询工作目录，不能假设旧固定路径仍在使用：
 
-- NapCat 侧自身的重启/监控机制；
-- 定期用管理员 QQ 发 `/查看配置` 之类命令做实际链路验证；
-- 检查日志中审核记录是否在正常增长。
+```bash
+systemctl show bili-group-gatekeeper.service --property=MainPID,WorkingDirectory,FragmentPath,DropInPaths
+```
+
+核对[全量迁移清单](configuration.md#全量迁移清单)：完整 data、环境选择、群和流程 YAML、外置文件、systemd 单元/drop-in、EnvironmentFile 和启动器注入值。绝对路径在迁移目录后可能仍指向旧版本，须单独确认。
+
+### 准备候选版本
+
+- 保留旧源码和提交标识，在独立目录准备候选源码及锁定依赖；不在仍运行的版本上替换文件。
+- 建立一致的预检查副本。在线 SQLite 必须用备份接口，不只复制主库。
+- 比较有效配置与原始文件，验证候选规则、输入分流、拒绝反馈和数据库读取。
+- 预检查副本不是最终数据；原进程此时可能继续收到新申请。
+
+### 停服并冻结最新状态
+
+```bash
+sudo systemctl stop bili-group-gatekeeper.service
+systemctl show bili-group-gatekeeper.service --property=ActiveState,MainPID
+```
+
+确认旧 PID 已退出，再备份旧版本、完整配置及 data；校验备份可读取。数据目录之外的 YAML、环境文件和服务配置也要备份。然后把最新冻结数据复制到候选目录，不能用更早的预检查副本覆盖。
+
+### 验证后切换
+
+- 比较新旧有效配置：每个群、门槛、目标、分支、通知、Cookie 来源和 WebUI 设置；路径按新旧根目录归一后核对实际文件。
+- 核对原始配置文件及完整 SQLite 表结构、行数和数据内容；运行 `PRAGMA integrity_check`。仅比较行数不能证明一致。
+- 确认升级后的 schema 与旧版本回退要求；保留旧 JSON，不把它当作持续同步的数据源。
+- 修改同一个服务单元的工作目录、Python 路径及环境文件路径，重新校验，然后 `daemon-reload` 并启动。保留旧版本和备份。
+
+### 上线验收
+
+- 确认新进程实际工作目录、服务状态、重启计数及 Bot 的 OneBot 连接日志。
+- 通过 OneBot 只读状态检查及 B站只读查询确认连接、Cookie 和 UID/昵称路径。
+- 复查全部配置、数据库完整性、pending 状态；启动恢复任务不能消除尚未确认的审批。
+- 用管理员私聊 `/查看配置` 验证实际收发；`/检查bili` 没有申请 QQ。
+- 需要验证真实入群结果时，用受控申请核对 QQ 实际回执、审计与用户反馈。单元测试、只读 API 或进程存活均不能代替。
+
+## 回退
+
+先停止新进程并保留其最新配置和 data。新版本已收到业务记录时，回退要使用最新数据并确认旧代码 schema 兼容性；不能直接恢复停服前的旧备份丢弃新记录。无法兼容时需专门的数据恢复方案。
+
+恢复原服务单元及对应环境配置，重新加载、启动并重复健康与配置检查。不要同时启动两个发布目录。

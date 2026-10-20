@@ -25,6 +25,12 @@ per-group review pipelines. A supported deployment runs one Bot process.
   `not_required` means the audit does not require an external approval action.
 - **Binding**: a recorded QQ/Bilibili identity relationship used by `no_conflict`
   and `no_identity_change`. It does not prove initial account control.
+- **Account input**: an extracted join-request answer classified as explicit or
+  numeric UID, or nickname. UID lookup and nickname search never cross-fallback;
+  malformed marked UIDs fail local validation. Inaccessible APIs remain unknown.
+- **Rejection explanation**: confirmed facts, requirements, and a next action,
+  with configured text kept as a supplement. Unknown-state rejections explain
+  incomplete verification; true-state rejections explain the configured policy.
 - **Identity decision lock**: process-local serialization of the QQ and Bilibili
   UID from binding lookup through decision finalization. Manual resolution and
   binding removal share the same lock manager.
@@ -39,3 +45,10 @@ Its imports do not register handlers or create runtime files.
 exception translation, Bilibili HTTP, SQLite, configuration I/O, WebUI, and workers.
 The plugin composes the core with external adapters; the core never imports the
 plugin. See [ADR 0002](docs/adr/0002-framework-independent-core.md).
+
+Current operator-facing behavior is documented in the
+[review rules](docs/review-requirements.md),
+[configuration sources](docs/configuration.md), and
+[rejection feedback](docs/rejection-feedback.md). Historical plans are separately
+archived; an independent business core does not imply an independent OneBot entry
+point or database-backed configuration.
