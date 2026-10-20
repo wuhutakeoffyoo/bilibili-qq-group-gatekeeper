@@ -5,18 +5,18 @@
 [![CI](https://github.com/wuhutakeoffyoo/bilibili-qq-group-gatekeeper/actions/workflows/ci.yml/badge.svg)](https://github.com/wuhutakeoffyoo/bilibili-qq-group-gatekeeper/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
-项目仍处于早期阶段，升级前请备份本地 `data/` 和 `.env.prod`。欢迎通过 [Issue](https://github.com/wuhutakeoffyoo/bilibili-qq-group-gatekeeper/issues) 报告问题，或阅读 [贡献指南](CONTRIBUTING.md) 参与开发。
+项目仍处于早期阶段，升级前请备份完整 `data/`、`.env`、`.env.prod`、实际使用的群配置及审核流程 YAML，以及服务注入的环境配置。迁移范围见[部署与升级](docs/deploy-systemd.md)。欢迎通过 [Issue](https://github.com/wuhutakeoffyoo/bilibili-qq-group-gatekeeper/issues) 报告问题，或阅读[贡献指南](CONTRIBUTING.md)参与开发。
 
-项目文档：[更新日志](CHANGELOG.md) · [开发目标与落地记录](docs/development-roadmap.md) · [原始筛选需求](docs/review-requirements.md)。后两份文档保留历史规划和需求，当前行为与配置以本 README 和 [领域说明](CONTEXT.md) 为准。
+项目文档：[文档目录与功能核对](docs/README.md) · [更新日志](CHANGELOG.md) · [功能状态与后续规划](docs/development-roadmap.md) · [当前审核规则](docs/review-requirements.md) · [拒绝反馈](docs/rejection-feedback.md)。历史需求原文已单独归档，不作为当前功能说明。
 
 ## 功能
 
 ### 审核规则
 
 - 分组审核管道：每组直接配置条件列表，并使用 `all_pass` 或 `any_pass` 汇总 T/F/I 状态
-- 支持的条件：B站账号搜索、B站等级、QQ 等级、关注指定 B站 UID、粉丝牌、无退群记录、无冒用、不更换身份
+- 支持的条件：B站账号确认、B站等级、QQ 等级、关注指定 B站 UID、粉丝牌、无退群记录、账号绑定冲突校验、不更换绑定账号
 - 自定义拒绝名单：可配置特定 B站 UID 的黑名单，命中后直接拒绝并附带自定义理由
-- 条件审核结果展示：`/检查qq <QQ号>` 可查看每次申请的逐条件通过/未通过详情
+- 条件审核结果展示：`/检查qq <QQ号>` 可查看申请统计、绑定信息及最近 5 条申请的逐条件结果
 
 ### 审核条件
 
@@ -25,16 +25,16 @@
 - 粉丝牌校验：检查申请者是否拥有指定主播粉丝牌，并满足最低等级
 - 退群记录：记录退群用户 QQ、退群时间、退群时昵称
 - 退群拦截：可选启用，发现申请者存在退群记录时拒绝或忽略
-- 防冒用检测（`no_conflict`）：若不同 QQ 重复使用已登记的 B站 UID，由所在分组的 F 分支决定后续动作
-- 防换绑检测（`no_identity_change`）：同一 QQ 不允许更换到其他 B站 UID；可使用 `/解除绑定 <QQ号>` 后重新绑定
-- 未搜到 B站账号处理：由审核分组中 `bili_account` 条件的 F 分支决定
+- 绑定冲突校验（`no_conflict`）：若 B站 UID 已归属其他 QQ，条件为 F，由所在分组决定动作；这不能证明首次申请者拥有该 B站账号
+- 换绑校验（`no_identity_change`）：本次 UID 与该 QQ 已持有的绑定不一致时为 F；管理员可使用 `/解除绑定 <QQ号>`，重新申请并获准后再建立绑定
+- 账号确认（`bili_account`）：UID/昵称确认成功为 T，确定不存在、格式错误或多个同名精确匹配为 F，接口异常或资料不足为 I
 
 ### 管理命令
 
 - `/设置群 <群号> [<参数名> <值> ...]`：配置指定群的审核参数（仅超级管理员）；参数和值可选，不填写时创建基础配置或保留已有配置
 - `/查看配置 [<群号>]`：不填写群号时查看全局配置，填写后查看指定群配置
 - `/检查qq <QQ号>`：查看指定 QQ 的申请记录、绑定信息与条件结果
-- `/检查bili <群号> <B站UID或昵称>`：检查指定 B站账号在指定群的审核结果，不写入持久化数据
+- `/检查bili <群号> <B站UID或昵称>`：模拟指定 B站账号的审核，不写申请审计、绑定和退群记录；未提供申请 QQ 的条件为 I
 - `/移除退群记录 <QQ号>`：删除指定 QQ 在所有群的退群记录（仅超级管理员）
 - `/解除绑定 <QQ号>`：清除指定 QQ 的 B站绑定归属，允许重新绑定
 - `/待确认审批`：查看审批调用异常或进程退出后尚未确认结果的审批（仅超级管理员）
@@ -62,7 +62,7 @@
 - 磁盘空间监控：定期检查剩余空间，过低时私聊通知超级管理员
 - 申请审计：每次加群申请记录 QQ、B站昵称、UID、审核结果、条件详情
 - 多群配置：支持单群、多群共享、多群分别配置三种方式
-- 数据持久化：申请审计、绑定与退群记录保存在本地 SQLite，配置文件保存在 `data/` 目录
+- 数据持久化：申请审计、绑定与退群记录保存在本地 SQLite；运行时配置在 `data/runtime/`，环境文件和 YAML 路径由部署配置决定
 
 ## 设计亮点
 
@@ -190,8 +190,8 @@ nano .env.prod
 `.env.prod` 的重点配置项说明：
 
 - `SUPERUSERS`：机器人超级管理员 QQ，可用所有命令（包括 Cookie 操作），接收异常加群事件通知。支持多个，例如 `["123456789"]` 或 `["123456789","987654321"]`
-- `ADMIN_QQS`：普通管理员 QQ，可用群配置、记录查看等常规命令，不可操作 Cookie 类敏感信息；只有在 `NOTIFY_ADMINS_ON_ABNORMAL_REQUEST=all` 时才会接收异常加群事件通知。多个可用逗号分隔，例如 `123456789,987654321`
-- `NOTIFY_ADMINS_ON_ABNORMAL_REQUEST`：异常加群事件通知模式。异常加群事件仅指“疑似冒用他人 B 站账号”和“命中退群记录”。`all` = 通知 `SUPERUSERS` 和 `ADMIN_QQS`；`superusers_only` = 仅通知 `SUPERUSERS`（默认）；`none` = 不通知任何人
+- `ADMIN_QQS`：普通管理员 QQ，可查看配置、检查记录和解除绑定，不可执行 `/设置群`、Cookie 操作及审批恢复命令。多个可用逗号分隔，例如 `123456789,987654321`
+- `NOTIFY_ADMINS_ON_ABNORMAL_REQUEST`：阶段分支包含 `effects: [notify_admin]` 时的收件人模式。`all` = 超级管理员和普通管理员；`superusers_only` = 仅超级管理员（默认）；`none` = 关闭阶段通知。仅命中退群或绑定冲突不会自动推送；磁盘及审批异常通知不由此项关闭
 - `ONEBOT_WS_URLS`：NapCat OneBot v11 WebSocket 地址，例如 `["ws://127.0.0.1:3001/onebot/v11/ws"]`
 - `ONEBOT_ACCESS_TOKEN`：NapCat 中配置的访问令牌
 - 群审核配置支持单群和多群两种写法：
@@ -229,6 +229,8 @@ nano .env.prod
 - Bot 启动、`/设置cookie` 或 `/获取cookie` 使 Cookie 生效时，会检查登录账号是否关注所有群配置中的 `target_uids`；明确未关注时自动关注
 - 自动关注需要 Cookie 包含 `bili_jct`；检查或关注失败只记录日志并返回摘要，不会阻止 Bot 启动
 - 群聊中发送这些命令不会返回结果
+- 重启加载时，非空 `BILI_COOKIE` 环境配置会覆盖运行时 Cookie。使用 `/设置cookie` 后若希望重启仍使用新值，应同步更新旧环境值，或清空环境值并保留 `data/runtime/plugin_state.json`
+- 邮件和 Cookie 检查周期使用进程环境变量；单独写进 `.env.prod` 不会自动导出。详见[邮件配置](docs/cookie-email-alert.md)
 
 ### 4. 配置 NapCat
 
@@ -245,16 +247,18 @@ chmod +x start.sh
 ./start.sh
 ```
 
-首次运行会自动安装 `uv`、从模板创建本地 `.env` 和 `.env.prod`，并询问必填项。自动化部署可跳过问答：
+缺少 `uv` 时脚本会尝试安装。首次创建 `.env.prod` 时询问超级管理员 QQ、OneBot 地址和 Token；已有配置时直接复用。脚本不会代填群号、目标 UID 或 B站 Cookie，仍需完成这些配置。自动化部署可跳过问答：
 
 ```bash
 ./start.sh --quick
 ```
 
+快速模式只跳过问答；缺少配置时仍只生成占位模板，不代表已经具备可用的审核配置。
+
 也可以手动启动（先按上文创建本地配置）：
 
 ```bash
-uv run python bot.py
+uv run --locked python bot.py
 ```
 
 生产环境建议使用 systemd 托管（崩溃自动拉起、开机自启），见 [docs/deploy-systemd.md](docs/deploy-systemd.md)。
@@ -282,7 +286,7 @@ Set-ExecutionPolicy -Scope CurrentUser -ExecutionPolicy RemoteSigned
 
 `start.ps1` 会通过 `uv` 自动完成：创建虚拟环境 → 安装依赖 → 启动机器人。
 
-首次运行还会自动安装 `uv`、从模板创建本地 `.env` 和 `.env.prod`，并询问必填项。无需问答时可使用：
+缺少 `uv` 时会尝试安装；仅在首次创建 `.env.prod` 时询问 QQ、OneBot 地址和 Token。群配置和 Cookie 需另行填写。无需问答时可使用：
 
 ```powershell
 .\start.ps1 -Quick
@@ -300,13 +304,13 @@ uv run --locked python bot.py
 
 | 命令                     | 可用权限          | 说明                      |
 | ---------------------- | ------------- | ----------------------- |
-| `/help`                | 超级管理员 / 普通管理员 | 查看所有可用指令                |
+| `/help`（别名 `/帮助`） | 超级管理员 / 普通管理员 | 查看所有可用指令 |
 | `/查看配置 [<群号>]`         | 超级管理员 / 普通管理员 | 查看全局或指定群的配置             |
 | `/设置群 <群号> [<参数> <值> ...]` | 仅超级管理员    | 配置加群审核参数                |
 | `/移除退群记录 <QQ号>`        | 仅超级管理员        | 删除该 QQ 在所有群的退群记录        |
 | `/解除绑定 <QQ号>`          | 超级管理员 / 普通管理员 | 清除该 QQ 当前的 B站 绑定归属      |
 | `/检查qq <QQ号>`            | 超级管理员 / 普通管理员 | 查看该 QQ 的申请与绑定记录         |
-| `/检查bili <群号> <B站UID或昵称>` | 超级管理员 / 普通管理员 | 检查某 B站账号的审核结果（不持久化）   |
+| `/检查bili <群号> <B站UID或昵称>` | 超级管理员 / 普通管理员 | 模拟审核；不写申请、绑定和退群记录 |
 | `/设置cookie <B站Cookie>` | 仅超级管理员        | 手动设置 B 站 Cookie         |
 | `/获取cookie`            | 仅超级管理员        | 从 CookieCloud 同步 Cookie |
 | `/登录二维码`               | 仅超级管理员        | 生成 B 站扫码登录二维码           |
@@ -319,11 +323,11 @@ uv run --locked python bot.py
   - 可使用所有命令
   - 接收异常加群事件通知
 - 普通管理员：`.env.prod` 中 `ADMIN_QQS` 字段配置的 QQ
-  - 可使用群配置、记录查看和用户检查命令
+  - 可查看配置、检查用户与记录、解除绑定；不能执行 `/设置群`
   - 不可操作 B 站 Cookie 等敏感信息
   - 默认不接收异常加群事件通知；仅当 `NOTIFY_ADMINS_ON_ABNORMAL_REQUEST=all` 时接收
 
-可用参数：
+`/设置群` 接受以下参数名，每个参数后必须有一个值：
 
 - `enable on/off`：启用或禁用该群
 - `required_qq_level 等级`：设置 QQ 最低等级
@@ -333,9 +337,16 @@ uv run --locked python bot.py
 - `required_medal_level 等级`：设置粉丝牌最低等级
 - `reject_reason_with_leave_time on/off`：拒绝原因是否附带退群时间
 - `reject_reasons JSON`：按条件补充管理员说明，例如 `{"qq_level":"本群设有等级门槛"}`；程序同时保留实际测得值、要求及处理建议
-- `custom_reject_uids JSON`：自定义拒绝名单，JSON 格式的键值对；key 为要拒绝的 B站 UID，value 为该 UID 对应的拒绝理由；可以定义多个。例如：`{"123456":"疑似主播本人ID","654321":"已知违规用户"}`
-- `/解除绑定 <QQ号>`：清除该 QQ 当前持有的 B站绑定归属；解除后再次申请并填写新的 B站昵称时，会重新建立绑定
-- `/检查bili <群号> <B站UID或昵称>`：返回逐条件检查结果和最终判定，不会写入任何持久化数据
+
+JSON 作为一个参数传入时，用外层单引号保留 JSON 的双引号，例如：
+
+```text
+/设置群 123456789 reject_reasons '{"qq_level":"本群设有等级门槛"}'
+```
+
+`custom_reject_uids`、`review_pipeline_file` 及审核分组通过 YAML 或环境配置设置，当前不是 `/设置群` 支持的参数。命令更新项保存在 `data/runtime/group_overrides.json`；保存失败时原配置继续生效，重启时仍可能被显式 `GROUP_*` 环境字段覆盖。
+
+`/检查bili` 不接收申请 QQ，因此 QQ 等级、退群记录和绑定关系按 I 参与模拟；其输出不能代替真实申请结果或用于确认一次 pending 审批。
 
 ## .env.prod 群配置参数说明
 
@@ -438,6 +449,7 @@ GROUP_2_REVIEW_PIPELINE_FILE=review_pipeline_group2.yaml
 - `GROUP_ID=111,222` 这种写法表示这些群共用同一套 `GROUP_*` 配置
 - `GROUP_1_ID=...` 这种写法表示每个群有自己独立的一套配置
 - 如果同时配置了 `GROUP_CONFIG_FILE` 和扁平环境变量，后者会覆盖前者的同名字段
+- 完整合并顺序、命令覆盖文件与路径规则见[配置来源与迁移](docs/configuration.md)
 
 ### 参数含义
 
@@ -452,7 +464,7 @@ GROUP_2_REVIEW_PIPELINE_FILE=review_pipeline_group2.yaml
 | `GROUP_REQUIRED_MEDAL_LEVEL`          | 数字               | 粉丝牌最低等级要求                                                      |
 | `GROUP_REJECT_REASON_WITH_LEAVE_TIME` | `true` / `false` | 拒绝时是否附带退群时间                                                    |
 | `GROUP_REVIEW_PIPELINE_FILE`          | 文件路径             | 推荐配置方式；指向独立 YAML 审核分组文件，支持命名分组、`goto` 跳转、`effects` 副作用         |
-| `GROUP_CUSTOM_REJECT_UIDS`            | JSON 字符串         | 自定义拒绝名单，例如 `{"123456":"疑似主播本人ID"}`；命中直接拒绝                      |
+| `GROUP_CUSTOM_REJECT_UIDS`            | JSON 字符串         | 自定义拒绝名单，例如 `{"123456":"请填写你本人的账号"}`；确认 UID 后命中则直接拒绝 |
 
 说明：
 
@@ -486,7 +498,7 @@ GROUP_2_REVIEW_PIPELINE_FILE=review_pipeline_group2.yaml
 | `defaults.target_medal_uids`                | defaults | 数字列表                | 默认检查粉丝牌的主播 UID                    |
 | `defaults.required_medal_level`             | defaults | 数字                  | 默认粉丝牌最低等级                         |
 | `defaults.reject_reason_with_leave_time`    | defaults | `true` / `false`    | 拒绝时是否附带退群时间                       |
-| `defaults.reject_reasons`                   | defaults | 键值对                 | 按条件名自定义 F 状态的拒绝原因                 |
+| `defaults.reject_reasons`                   | defaults | 键值对                 | 按条件补充 F 拒绝说明，实际事实及要求仍保留 |
 | `defaults.review_pipeline_file`             | defaults | 文件路径                | 默认审核流程文件；相对路径按 groups.yaml 所在目录解析 |
 | `groups`                                    | —        | 对象                  | 各群独立配置，key 为群号字符串                 |
 | `groups.<群号>.enabled`                       | 群        | `true` / `false`    | 该群是否启用审核                          |
@@ -497,7 +509,7 @@ GROUP_2_REVIEW_PIPELINE_FILE=review_pipeline_group2.yaml
 | `groups.<群号>.required_medal_level`          | 群        | 数字                  | 粉丝牌最低等级                           |
 | `groups.<群号>.reject_reason_with_leave_time` | 群        | `true` / `false`    | 拒绝时是否附带退群时间                       |
 | `groups.<群号>.custom_reject_uids`            | 群        | 键值对                 | 自定义拒绝名单：key 为 B站 UID，value 为拒绝理由  |
-| `groups.<群号>.reject_reasons`                | 群        | 键值对                 | 覆盖该群各条件 F 状态的拒绝原因                 |
+| `groups.<群号>.reject_reasons`                | 群        | 键值对                 | 替换该群的补充说明映射，不隐藏具体原因 |
 | `groups.<群号>.review_pipeline_file`          | 群        | 文件路径                | 该群专属审核流程文件；覆盖 defaults 中的值        |
 
 #### review\_pipeline.yaml
@@ -510,7 +522,7 @@ GROUP_2_REVIEW_PIPELINE_FILE=review_pipeline_group2.yaml
 | `groups[].id`         | 分组 | 字符串    | 分组唯一标识，用于 `goto` 跳转               |
 | `groups[].name`       | 分组 | 字符串    | 分组显示名称，出现在审核轨迹和 `/检查bili` 输出中   |
 | `groups[].mode`       | 分组 | 字符串    | `all_pass`（全部通过）或 `any_pass`（任一通过） |
-| `groups[].conditions` | 分组 | 字符串列表  | 该分组按顺序检查的条件名列表                    |
+| `groups[].conditions` | 分组 | 字符串列表  | 参与该组汇总及原因展示的条件；不代表按此顺序逐个请求接口 |
 | `groups[].on_true`    | 分组 | 对象或字符串 | 条件为 `true` 时的动作；支持简写（直接写动作名）或完整写法 |
 | `groups[].on_false`   | 分组 | 对象或字符串 | 条件为 `false` 时的动作                  |
 | `groups[].on_unknown` | 分组 | 对象或字符串 | 条件无法判断时的动作                        |
@@ -522,7 +534,7 @@ GROUP_2_REVIEW_PIPELINE_FILE=review_pipeline_group2.yaml
 | `flow`    | 字符串   | 流转动作（必填）：`next` / `approve` / `reject` / `ignore` |
 | `goto`    | 字符串   | 跳转目标分组 `id`；仅当 `flow=next` 时有效，可选                 |
 | `effects` | 字符串列表 | 附加动作：`notify_admin` / `log_warn`；可选               |
-| `reason`  | 字符串   | 覆盖默认原因文案；可选                                       |
+| `reason`  | 字符串   | 阶段说明；拒绝时会同时补充实际条件及处理提示，不会遮盖事实 |
 
 ### 查看配置
 
@@ -540,6 +552,8 @@ GROUP_2_REVIEW_PIPELINE_FILE=review_pipeline_group2.yaml
 
 日志按天写入本地 `logs/` 目录，可通过 `LOCAL_LOG_DIRECTORY` 修改路径。日志不会上传到 WebDAV 或其他云端，也不会由程序自动删除。程序启动时会检查一次日志目录所在磁盘，之后每 6 小时检查一次；剩余空间低于 1 GB 时通知 `SUPERUSERS`，低于 0.2 GB 时发送严重告警，由管理员决定如何处理磁盘空间。
 
+配置 SMTP 进程环境后，磁盘告警也会发送邮件；同类成功通知会去重、发送失败会在后续周期重试。详见[异常状态邮件告警](docs/cookie-email-alert.md)。
+
 ## 审核流程 WebUI
 
 ```env
@@ -556,6 +570,8 @@ WEBUI_LOGIN_WINDOW_SECONDS=900
 ```
 
 通过 HTTPS 域名访问 WebUI，在登录页输入 `WEBUI_TOKEN`。不要把 Token 放在 URL 中；查询参数 Token 已不再支持。界面支持 YAML 编辑、分组表单、新增、删除、拖拽排序和流程预览；保存前会校验分组、条件、模式和跳转目标，再原子替换 `review_pipeline.yaml`。保存成功后，使用该文件的群会立即对新收到的申请采用更新后的流程；已开始处理的申请按其已读取的流程继续。
+
+当前 WebUI 只能编辑一个实际审核 YAML；多个群可共享该文件。配置了多个不同 `review_pipeline_file` 时不能使用当前 WebUI。界面编辑的是条件列表、模式和 `goto` 目标，不支持布尔表达式或拖线改跳转，也不编辑 `groups.yaml` 的群基础参数。
 
 ### 公网安全部署
 
@@ -634,12 +650,13 @@ body {
 ## 数据持久化
 
 - 运行时配置：`data/runtime/plugin_state.json`
+- `/设置群` 的字段覆盖：`data/runtime/group_overrides.json`
 - 申请审计、QQ/B站绑定和退群记录：`data/records/gatekeeper.sqlite3`
 - 旧版记录：首次启动时会自动从 `data/records/join_request_records.json` 和 `data/records/leave_records/*.json` 导入 SQLite；导入完成后旧文件保持不变，作为回滚备份保留
 
 SQLite 使用 WAL 和事务保证本地写入一致性。运行中可能同时存在
 `gatekeeper.sqlite3-wal` 与 `gatekeeper.sqlite3-shm`，不要只复制主数据库文件进行在线备份。
-最简单可靠的备份方法是先停止 Bot，再完整备份 `data/` 目录和 `.env.prod`。
+最简单可靠的备份方法是先停止 Bot，再按[全量迁移清单](docs/configuration.md#全量迁移清单)备份数据、环境文件、实际 YAML 及服务环境文件。
 
 数据库结构通过版本号自动升级。执行同意或拒绝前，Bot 会先写入一条 `pending`
 审计；QQ 接口确认成功后标记为 `applied`，明确返回失败时标记为 `failed`，无需调用 QQ 接口的忽略记录标记为
@@ -653,9 +670,9 @@ SQLite 使用 WAL 和事务保证本地写入一致性。运行中可能同时�
 `/确认审批 <审计ID> applied` 或 `/确认审批 <审计ID> failed`；全部确认后自动恢复。
 
 B站检查复用 HTTP 连接，最多同时执行 4 个完整检查，每个检查总时限为 60 秒。
-接口限流、持续异常或超时会按“无法判断”处理，不会因为网络问题直接拒绝申请。
+接口限流、持续异常或超时按 I 处理，最终动作由 `on_unknown` 决定；如果该分支配置 `reject`，反馈会说明暂无法核验，而不是断言账号不存在或未关注。
 
-升级或重装时保留 `data/` 目录即可延续已有配置和记录。
+升级或重装时，除完整 `data/` 外，还需迁移实际环境文件、YAML 及服务注入的环境配置，并保留原路径关系。只复制 `data/` 无法保证全量配置迁移。
 
 ## 参与贡献与安全
 

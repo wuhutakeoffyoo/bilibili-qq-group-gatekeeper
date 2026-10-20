@@ -77,6 +77,13 @@ request-level outcome or idempotency contract. This requires a separate ADR.
 
 Moving business configuration into versioned SQLite storage would replace ADR
 0001's configuration decision and requires its own migration and rollback plan.
-Configuration snapshots, request rate control, UID lookup, expression syntax,
-ownership challenges, and member patrol are subsequent work with separate
-behavior and compatibility checks.
+UID lookup and UID/nickname input routing were implemented after this extraction;
+see the [current rules](../review-requirements.md) and
+[rejection feedback](../rejection-feedback.md). The extraction-time compatibility
+contracts above describe that refactor's scope, not a ban on later authorized
+behavior changes. Rejection formatting now preserves configured explanations
+alongside actual observations and requirements.
+
+Versioned configuration snapshots, request rate control, expression syntax,
+ownership challenges, and member patrol remain future work. They require their
+own behavior and compatibility checks.

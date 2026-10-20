@@ -169,7 +169,7 @@ class GroupConfig(BaseModel):
     required_medal_level: int = 1  # 粉丝牌最低等级要求
     reject_reason_with_leave_time: bool = True  # 拒绝时是否附带退群时间
     custom_reject_uids: dict[str, str] = Field(default_factory=dict)  # 自定义拒绝名单，key=B站UID，value=拒绝理由
-    reject_reasons: dict[str, str] = Field(default_factory=dict)  # 按条件覆盖拒绝原因
+    reject_reasons: dict[str, str] = Field(default_factory=dict)  # 按条件补充说明，实际事实和要求仍保留
     review_pipeline_file: str = ""  # 审核分组 YAML 文件
     review_stages: list["ReviewStageConfig"] = Field(default_factory=list)  # 阶段化审核配置
 

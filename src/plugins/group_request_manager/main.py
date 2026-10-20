@@ -796,7 +796,7 @@ def _format_help_text() -> str:
             "  /查看配置 [<群号>]           查看全局或指定群的配置",
             "  /解除绑定 <QQ号>             清除该 QQ 当前的B站绑定归属",
             "  /检查qq <QQ号>               查看该 QQ 的申请与绑定记录",
-            "  /检查bili <群号> <B站UID或昵称>   测试B站账号是否能通过审核",
+            "  /检查bili <群号> <B站UID或昵称>   模拟B站侧审核，不写申请记录",
             "",
             "▎超级管理员专属",
             "  /设置群 <群号> [<参数> <值> ...] 配置加群审核参数",
@@ -821,7 +821,7 @@ def _format_help_text() -> str:
             "  target_medal_uids            需要检查的主播 UID，逗号分隔",
             "  required_medal_level         粉丝牌最低等级 (数字)",
             "  reject_reason_with_leave_time 拒绝时是否附带退群时间 (on/off)",
-            "  custom_reject_uids           自定义拒绝名单 (JSON格式)",
+            "  自定义拒绝名单 custom_reject_uids 请在群 YAML 或环境配置中设置，不是 /设置群 参数",
             "",
             "━━━━ 说明 ━━━━",
             "  1. 所有命令仅对管理员私聊响应，群聊中不回复",
@@ -830,6 +830,7 @@ def _format_help_text() -> str:
             "  4. review_pipeline.yaml 使用 conditions + mode 定义分组，不支持布尔表达式",
             "  5. mode 可选 all_pass（全部通过）或 any_pass（任一通过）",
             "  6. 详细参数用 /设置群 无参数查看，审核分组请编辑 review_pipeline.yaml",
+            "  7. /检查bili 不提供申请QQ，QQ等级、退群及绑定条件按无法判断参与模拟",
         ]
     )
 
@@ -1566,7 +1567,7 @@ async def handle_check_qq(event: MessageEvent, arg: Message = CommandArg()) -> N
 
 @check_bili.handle()
 async def handle_check_bili(event: MessageEvent, arg: Message = CommandArg()) -> None:
-    """命令：/检查bili <群号> <B站UID或昵称> —— 测试审核结果（不持久化）。"""
+    """命令：/检查bili <群号> <B站UID或昵称> —— 模拟审核，不写申请、绑定或退群记录。"""
     if not _is_private_admin_event(event):
         return
 

@@ -1,4 +1,5 @@
-# 审核状态：true=T（通过条件），false=F（不通过条件），unknown=I（忽略条件）。
+# 审核状态：true=T（通过条件），false=F（不通过条件），unknown=I（无法判断）。
+# I 不是 ignore 动作；实际动作由对应 on_unknown 分支决定。
 # all_pass：任意 F 则分组为 F；无 F 但存在 I 则为 I；全部 T 才为 T。
 # any_pass：任意 T 则分组为 T；无 T 但存在 I 则为 I；全部 F 才为 F。
 version: 2
@@ -23,7 +24,7 @@ groups:
     on_unknown:
       flow: next
       goto: approve_group_b
-      reason: 筛选组A存在忽略项且无拒绝项，进入筛选组B
+      reason: 筛选组A存在无法判断项且无不通过项，进入筛选组B
 
   # 筛选组 B：有目标主播粉丝牌即通过，否则忽略，交由人工处理。
   - id: approve_group_b
