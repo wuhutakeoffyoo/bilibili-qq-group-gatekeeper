@@ -1,73 +1,83 @@
-# 配置来源与迁移
+# V3 配置、历史与迁移
 
-配置仍使用环境文件、YAML 和运行时 JSON；SQLite 存放申请、绑定、退群记录。当前没有把全部配置迁入数据库，也没有内置版本快照或一键回滚。
+默认运行时使用 `app/config.py`。群规则、管理员配置、B站凭证及编译后的审核阶段保存在 `data/records/gatekeeper.sqlite3`，数据库架构为 v4。首次导入完成后，旧 YAML、JSON 和 `GROUP_*` 环境变量不再参与业务配置合并。
 
-## 群配置加载顺序
+## 基础设施与业务配置
 
-[ConfigManager._load_config](../src/plugins/group_request_manager/config.py) 按以下顺序合并，后加载的来源可覆盖同一群的对应字段：
+| 类型 | 生效来源 | 修改方法 |
+| --- | --- | --- |
+| 环境选择、OneBot 地址/令牌、超级管理员、ASGI 监听、日志 | `.env` → `.env.<ENVIRONMENT>` → 进程环境；后者优先 | 修改私有环境文件后重启 |
+| 群开关、等级、目标 UID、限制名单、拒绝补充、审核阶段、所有权和巡检策略 | SQLite 当前配置修订 | 管理控制台、配置 API 或授权私聊命令 |
+| B站 Cookie、refresh token、凭证 generation、刷新确认状态 | SQLite 当前配置修订 | 凭证管理功能或授权命令；公开快照隐藏秘密 |
+| SMTP、CookieCloud、Cookie 检查周期 | 环境仅首次导入，后续读 SQL 当前修订 | 版本化配置编辑；秘密脱敏 |
+| 审计、QQ/UID 绑定、退群记录 | SQLite 业务表 | 审核流程及相应管理功能 |
+| pending 精确动作、所有权挑战、巡检元数据 | SQLite `runtime_state` | 对应服务以事务更新 |
 
-1. `data/runtime/plugin_state.json`；该文件不存在时，才兼容读取 `data/config/plugin_config.json`。
-2. `GROUP_CONFIG_FILE` 指向的 YAML；每个群先应用 `defaults`，再应用该群字段。YAML 中出现的群配置会替换运行时快照中的同群对象。
-3. `data/runtime/group_overrides.json`，保存 `/设置群` 修改的字段。
-4. 兼容的 `GROUP_CONFIGS` JSON 环境配置。
-5. `GROUP_ID` 和同组 `GROUP_*` 字段。
-6. `GROUP_1_ID`、`GROUP_2_ID` 等编号配置。
-7. 根据最终 `review_pipeline_file` 重新编译审核阶段；不沿用 JSON 中的旧阶段快照。
+基础设施文件仍需备份。数据库配置统一不意味着进程不再需要 OneBot 连接。WebUI 开关/令牌/安全字段首次可由环境初始化，之后属 SQL 且不允许浏览器修改；本地恢复见[管理台](admin-console.md)。
 
-同一来源内，`reject_reasons` 和 `custom_reject_uids` 是整份映射替换，不是逐键深合并。`GROUP_ID=111,222` 让多群共用字段；编号格式可分别配置各群。未启用或未配置的群不审核。
+## 首次导入的实际优先级
 
-显式群环境字段可能在重启时覆盖命令修改。因此“命令刚刚修改成功”不能说明重启后仍会采用该值；应检查是否还保留了同名 `GROUP_*` 配置。
+只在 SQL 没有当前配置修订时执行；已有 SQL 修订则直接加载 SQL。
 
-## 命令会保存什么
+1. `data/runtime/plugin_state.json`；不存在时读 `data/config/plugin_config.json`。
+2. 非空的全局环境设置：Cookie、管理员、通知模式和 WebUI 初始值等。
+3. `GROUP_CONFIG_FILE` 指向的群 YAML；每群先应用 `defaults`，再应用自身字段，整群替换此前同群对象。
+4. `data/runtime/group_overrides.json`，按字段覆盖。
+5. 旧 `GROUP_CONFIGS` JSON，按群整项替换。
+6. `GROUP_ID` 与对应 `GROUP_*` 字段。
+7. 连续编号的 `GROUP_1_*`、`GROUP_2_*` 等；遇第一个缺失编号停止。
+8. 按最终 `review_pipeline_file` 读取规则，将编译后的阶段和原始 `when` 内嵌到 SQL 快照。
 
-`/设置群` 支持：`enable`、`required_qq_level`、`required_bili_level`、`target_uids`、`target_medal_uids`、`required_medal_level`、`reject_reason_with_leave_time`、`reject_reasons`。
+群 YAML 中的相对 `review_pipeline_file` 以该 YAML 所在目录为基准；环境中的相对路径以应用根目录为基准。首次导入保存实际来源清单、文件散列和原始字节备份。源文件保留；主运行配置损坏会停止首次迁移，不能无声生成空配置。
 
-它只把实际修改的字段写入 `group_overrides.json`，不修改基础 YAML；保存成功后才替换运行中的群配置。保存失败时原配置继续生效。只输入群号可创建基础配置，但不会自动生成可用的审核管道。
+例如，`GROUP_CONFIG_FILE=data/config/groups.local.yaml` 配合 `review_pipeline_file: rules/review.yaml`，首次读取的是 `data/config/rules/review.yaml`。导入成功后即使修改或移走该文件，当前 SQL 规则仍保持不变。
 
-`custom_reject_uids` 和 `review_pipeline_file` 不属于该命令参数，应在 YAML 或环境配置中维护。WebUI 编辑实际审核流程 YAML，不编辑群基础 YAML。
+## 版本与并发编辑
 
-JSON 参数应加外层单引号，例如：
+- 每次替换、命令修改、导入、凭证更新都会追加修订。
+- 保存必须携带读取时的版本号；版本冲突应刷新并重新编辑，不能强行覆盖。
+- 回滚会生成一个新修订，并记录 `restored_from`；历史修订不被修改或删除。仅恢复业务配置，保留当前 B站 Cookie/token/generation/刷新待确认状态，避免复活历史会话。
+- `/设置群` 只修改本次指定字段，保留其他群字段和凭证；实际写入 SQLite。
+- `review_pipeline_file` 仅作为首次迁移来源说明，日常修改以 SQL 内嵌阶段为准。
+- `ConfigManager.get_snapshot()` 返回同一次读取的版本及配置。内部需要原始凭证时必须显式请求 `include_secrets=True`；不能把两次独立的配置读取和版本读取配对保存。
 
-```text
-/设置群 123456789 reject_reasons '{"qq_level":"本群设有等级门槛"}'
+## 标准 YAML 导入导出
+
+SQL 配置备份格式是 `version: 3` 加 `config` 对象，区别于首次迁移使用的群 YAML 和 `version: 2` 管道 YAML。
+
+```yaml
+version: 3
+config:
+  groups:
+    "123456789":
+      group_id: "123456789"
+      enabled: true
+      target_uids: [12345]
+      review_stages:
+        - index: 1
+          name: 基础审核
+          when: "bili_account && no_conflict && bili_level >= 2 && follow"
+          on_true: [approve]
+          on_false: [reject]
+          on_unknown: [ignore]
+  admin_qqs: []
+  notify_admins_on_abnormal_request: superusers_only
 ```
 
-## 路径规则
+此例省略的全局字段会采用默认值。导入整份配置前，应先导出当前完整配置再编辑，避免用局部示例替换现有设置。导入会校验群号、等级、表达式和路由，不会执行 QQ 审批，也不删除业务记录。
 
-| 配置 | 相对路径基准 |
-| --- | --- |
-| `GROUP_CONFIG_FILE` | Bot 启动工作目录 |
-| 群 YAML 中的 `review_pipeline_file` | 该群 YAML 所在目录 |
-| 扁平环境变量中的 `GROUP_REVIEW_PIPELINE_FILE` | Bot 启动工作目录 |
-| `LOCAL_LOG_DIRECTORY`、`WEBUI_CUSTOM_CSS_FILE` | Bot 启动工作目录 |
-| 内置 `data/` | Bot 启动工作目录 |
+默认导出将 Cookie、令牌、密码和刷新中间状态替换为 `[redacted]`。将该脱敏文件导回同一数据库时，占位符保留当前秘密。迁移到空数据库时，它不能恢复凭证，须单独提供。确需包含秘密的内部备份应显式导出并保存为仅服务账号可读的文件，不得提交 Git 或发到公开日志。
 
-例如，`GROUP_CONFIG_FILE=data/config/groups.local.yaml` 配合该文件中的 `review_pipeline_file: review.local.yaml`，实际流程文件为 `data/config/review.local.yaml`。
+## Cookie 与会话更新
 
-命令覆盖文件可能保存已经解析的绝对流程路径。更换发布目录时，必须检查这些路径是否仍指向期望文件；不能只把字符串复制过去就认定迁移正确。
+首次导入时，非空环境 `BILI_COOKIE` 覆盖旧运行时值；SQL 已建立后不再回退到旧环境 Cookie。因此手动更换 Cookie 后重启不会被旧 `BILI_COOKIE` 覆盖，主动清空 SQL Cookie 也不会从环境复活。
 
-## Cookie 与其他全局配置
+Cookie-only 手动或 CookieCloud 更新可能更换账号，会同时清除旧 refresh token 与旧刷新确认状态。显式 `set_credentials` 可保存 Cookie/token 配对并递增 generation；任何一般配置替换改变凭证时也必须推进 generation，不能导入旧刷新确认任务。普通业务编辑保留当前刷新恢复状态。原生刷新配对使用版本与 generation 检查防止覆盖并发修改。凭证行为见[凭证管理](credentials.md)。
 
-- NoneBot 根据 `.env` 的 `ENVIRONMENT=prod` 读取 `.env.prod`。systemd 的环境变量、`EnvironmentFile=` 和启动器注入也属于实际配置来源。
-- 启动加载时，非空 `BILI_COOKIE` 会覆盖运行时 JSON 中的 Cookie。`/设置cookie` 会更新当前内存及运行时文件；若旧环境值没有更新，重启后会重新采用旧值。
-- `ADMIN_QQS`、通知模式及 WebUI 参数也可由环境配置覆盖运行时状态。
-- `NOTIFY_SMTP_*`、`NOTIFY_FROM_ADDR`、`NOTIFY_TO_ADDR` 和 `COOKIE_CHECK_INTERVAL_SECONDS` 由 `os.getenv` 直接读取，需要注入进程环境；不能只依赖 NoneBot 解析 `.env.prod`。详见[邮件配置](cookie-email-alert.md)。
+## 备份、升级与回退
 
-## 全量迁移清单
+应保留完整 `data/`、全部实际环境文件、外置 CSS/首次迁移 YAML、systemd 单元及 drop-in、`EnvironmentFile=` 文件。在线数据库备份必须使用 SQLite 一致性备份接口；不能只复制主文件而遗漏 WAL。
 
-| 范围 | 应迁移内容 |
-| --- | --- |
-| 环境选择与连接 | `.env`、`.env.prod`，以及实际使用的其他环境文件 |
-| 群基础与审核规则 | `GROUP_CONFIG_FILE` 的真实文件、每个群实际引用的流程 YAML，保留相对目录关系 |
-| 运行时配置 | 完整 `data/runtime/`，尤其是 Cookie 状态与群覆盖文件 |
-| 业务记录 | 完整 `data/records/`，包括 SQLite 及保留的旧 JSON |
-| 旧配置与扩展状态 | 完整 `data/config/` 和其余现有 `data/` 内容 |
-| 服务环境 | systemd 单元、drop-in、所有 `EnvironmentFile=` 文件及启动器注入值 |
-| 可选外部文件 | 自定义 CSS、外置 YAML、其他配置引用文件；有符号链接时核对实际目标 |
-| 诊断日志 | 按运维需要另行保留实际日志目录，程序不会自动归档或删除 |
+v3 数据库升级到 v4 前会生成私有 SQLite 备份；首次业务配置导入另保存来源备份。数据库与秘密文件为 `0600`，备份目录为 `0700`（POSIX）。原有业务列和行不因 v4 配置迁移被重写。
 
-停 Bot 后复制整个 `data/` 最简单。在线备份必须使用 SQLite 一致性备份接口；只复制主数据库会遗漏 WAL 中尚未归并的记录。
-
-迁移后比较：群数量与启用状态、每个门槛和目标 UID、全部分支及跳转、通知/邮件/WebUI 配置、Cookie 来源、原始配置文件；再比较数据库表结构、行数和完整行内容。路径变化应按旧新应用根目录归一后比较，同时确认文件实际存在。不要在公开日志中输出凭据或原始业务记录。
-
-具体切换与回退流程见[部署与升级](deploy-systemd.md)。
+升级时先在副本核对有效配置和业务行；切换前停止旧进程，用冻结后的最新数据再次复制并校验。v3 旧代码拒绝打开 v4 数据库。软件回退需专门核对 schema 兼容性，配置版本回滚只适用于当前 V3 程序，二者不是同一操作。详见[部署与升级](deploy-systemd.md)。

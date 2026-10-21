@@ -1,5 +1,5 @@
 [Unit]
-Description=Bilibili QQ Group Gatekeeper (NoneBot2 QQ 加群审核)
+Description=Bilibili QQ Group Gatekeeper (FastAPI / OneBot)
 After=network-online.target
 Wants=network-online.target
 
@@ -16,8 +16,8 @@ ExecStart=/opt/bili-group-gatekeeper/.venv/bin/python bot.py
 Restart=on-failure
 RestartSec=5
 
-# NoneBot 收到 SIGINT 会优雅断开 OneBot 连接后再退出
-KillSignal=SIGINT
+# Uvicorn 收到 SIGTERM 后等待生命周期关闭连接、队列和后台任务
+KillSignal=SIGTERM
 TimeoutStopSec=30
 
 Environment=PYTHONIOENCODING=utf-8

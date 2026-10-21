@@ -1,86 +1,54 @@
-# Bilibili QQ Group Gatekeeper 交接文档
+# Bilibili QQ Group Gatekeeper 交接
 
-更新时间：2026-10-20。对照代码基线 `a974209` 核对；分支、CI、生产目录和配置都可能变化，接手时重新检查。
+更新：2026-10-21。分支、CI、生产状态须接手时重新核对；历史验收不等于当前实测。
 
 ## 接手顺序
 
-1. `git status --short --branch`、`git log -5 --oneline`，确认工作区和提交。
-2. 阅读[文档目录与实现对应](docs/README.md)、[领域说明](CONTEXT.md)、[配置来源](docs/configuration.md)。
-3. 读所改模块及对应回归；使用锁定环境验证。不要把历史生产验收当成当前状态。
-4. 文档或命令变更同步检查[贡献清单](CONTRIBUTING.md)。
+1. 检查 Git 状态和提交；阅读 [文档索引](docs/README.md)、[领域](CONTEXT.md)和[架构](docs/architecture.md)。
+2. 对照 [V3 验收矩阵](docs/v3-implementation.md)与实际模块，避免将旧核心抽离版本当作当前版本。
+3. 功能变更同步 [贡献清单](CONTRIBUTING.md)和更新日志；禁止提交凭证、SQLite、运行记录及私有备份。
 
-2026-09-28 的仓库历史重置已经完成，不应再次执行删除仓库、强推或清除历史。旧安全告警数量、主机路径及测试计数是历史快照，不作为当前事实。
+## 当前边界
 
-## 架构与存储
-
-| 层 | 责任 |
+| 路径 | 责任 |
 | --- | --- |
-| `src/gatekeeper/` | 纯配置模型、输入解析、条件、T/F/I 汇总、路由、格式化、身份锁、持久审批编排 |
-| `src/plugins/group_request_manager/` | NoneBot 注册、OneBot 事件与异常转换、HTTP、SQLite、配置 I/O、WebUI 和后台任务 |
-| `bot.py` | 当前 NoneBot 启动入口；独立 OneBot 入口尚未实现 |
-| SQLite | `data/records/gatekeeper.sqlite3`，保存业务记录 |
-| 配置文件 | 环境文件、群/流程 YAML、运行时 JSON；尚未迁入 SQLite |
+| `bot.py` / `app/main.py` | 默认独立 FastAPI，统一 OneBot 反向 WS、管理台和 H5，单 worker |
+| `app/onebot/` | 正反向 WS、echo、有限事件队列、明确失败与未知结果、NapCat 精确请求观测 |
+| `app/service.py` / `commands.py` | 入群、退群、模拟、权限和命令应用服务 |
+| `src/gatekeeper/` | 纯模型、输入路由、条件、AST 三值逻辑、流程、格式化和身份锁 |
+| `app/gatekeeper/` | 局部 pending、持久化对账与逐条确认 |
+| `app/config.py` / `database/` | SQLite v4 配置版本、一次迁移、业务记录及扩展状态 |
+| `app/bilibili/` | 单路 UID/昵称查询、限流缓存、凭证、只读归属证据与申请者隔离扫码 |
+| `app/ownership.py` / `patrol.py` | 归属验证、一次授权及复查、巡检报告与受限动作 |
+| `legacy_bot.py` / `app/nonebot_adapter.py` | 显式安装 legacy extra 后，转换事件/动作并使用同一新服务 |
 
-核心不能导入 NoneBot/插件、创建运行文件或打开外部连接。旧插件模型及格式化导入路径保留兼容转发。参见 [ADR 0001](docs/adr/0001-sqlite-record-storage.md) 与 [ADR 0002](docs/adr/0002-framework-independent-core.md)。
+`src/plugins/group_request_manager/` 是旧行为回归材料。不要用其旧配置/数据库模块打开 v4 数据库，默认入口也不得导入该包。
 
-## 业务约束
+## 必须保持
 
-- T=已有证据通过；F=已有证据不通过；I=无法判断。`ignore` 是动作，不是 I 的别称。
-- `all_pass` 与 `any_pass` 只汇总状态，实际动作由分支决定。仅支持 `conditions + mode`，不恢复旧布尔表达式。
-- 仓库 A/B 流程是占位示例，不是所有群硬编码的规则；绑定校验只有被管道引用时才参与。
-- 未配置或未启用的群不审核。管理命令仅响应管理员私聊；命令英文不区分大小写。
-- UID 标记优先，清洗后只走 UID 资料接口；纯数字同样只走 UID。其他昵称只走搜索。显式 UID 格式错误本地失败，不能回退昵称。
-- 账号查询成功仍要按群规则审核。接口异常、分页不完整且无精确匹配、缺失资料均保持 I。
-- 搜索只认唯一精确匹配；一个精确匹配加其他模糊结果可接受，多个精确匹配拒绝。
-- 关注目标满足任意一个即可；共同关注完整且登录账号已确认关注全部目标时，才可据未命中判 F，否则回退关注列表，仍不完整则 I。
-- 粉丝牌条目解析缺失保持 I；已有明确达标条目可为 T。
-- 绑定是已登记关系，不证明首次申请者的账号所有权。不能把绑定冲突写成已证实冒用。
+- 清洗后的显式 UID 和纯数字只走 UID 接口；其他输入只走昵称搜索。裸数字恰等于申请QQ时本地提示误填，显式 UID 可消歧。输入失败明确要求检查，且不填写昵称/UID以外内容。
+- T/F/I 为证据状态；`ignore` 是流程动作。分页缺失、隐私、网络错误不证明不存在。自定义拒绝说明不能遮盖真实事实、要求和下一步。
+- v2 数组/goto 兼容；v3 AST 只允许已知条件、安全布尔与数值比较。粉丝牌数值是完整目标集合最大等级；不完整列表不能据低等级作数值否定。
+- 先持久化审批意图，再发 OneBot 动作。超时/断线/取消不等于失败；只占用相关 QQ/UID。只有精确仍未处理证据允许一次重发，成员存在或 checked=true 不能核销。
+- 只读对账暂时不可用时按持久化预算退避；证据不充分则逐条人工确认，不能冻结所有用户。
+- 业务配置只在首次导入旧来源；后续 SQL 为准。修改必须版本检查；回滚追加修订并保留当前凭证。旧环境不得覆盖已更新 Cookie 或业务设置。
+- 配置修订、迁移来源、动作载荷与数据库备份含秘密，使用私有权限；公开 API/默认导出隐藏凭证。私有动作记录可能保留专属反馈链接。
+- 可选归属验证不绕过入群规则。申请者扫码凭证仅在内存验证后丢弃，禁止写入管理员凭证。原申请未处理状态不明确时禁止自动恢复。
+- 巡检默认关闭，必须显式 `patrol.when`。使用本群已通过 UID、真实当前成员、最新角色/绑定/策略、宽限期及新证据；Unknown 不独立触发移出。其他群仍存在或审批未确认时保留绑定。
 
-详细规则及路由边界见[当前审核规则](docs/review-requirements.md)。
+## 运维与验证
 
-## 拒绝反馈
-
-- 说明具体原因、测得值/目标/门槛及下一步。没有证据时不能声称“账号不存在”“未关注”。
-- 账号输入失败需区分 UID 与昵称，要求检查，并告知“请不要填写B站昵称或UID以外的内容”。
-- 条件和阶段自定义文案是补充；不能遮盖真实原因、要求和输入提示。
-- T 分支拒绝说明策略；I 分支拒绝说明未完成核验和后续处理。
-- 应用不再按 120 字静默截断。QQ 参数、审计、管理员阶段通知、检查命令共用反馈逻辑；不保证外部客户端无限长显示。
-- 退群时间遵从配置，不泄露绑定冲突另一方 QQ。见[拒绝反馈说明](docs/rejection-feedback.md)。
-
-## 审批、去重与恢复
-
-- 先持久化 pending，再执行 OneBot 操作；成功为 applied，明确 `ActionFailed` 为 failed，非审批记录为 not_required。
-- 超时、断连、取消及进程意外退出不能证明 QQ 操作失败。保留 pending，暂停新的自动同意/拒绝。
-- 重启恢复 pending。超级管理员核对实际结果后使用 `/待确认审批` 和 `/确认审批 <审计ID> applied|failed`；全部 pending 解决后恢复。
-- 身份锁覆盖绑定读取至最终写入；QQ、B站 UID 和重复请求保持串行。解除绑定、人工确认也用同一套锁。
-- 不因成员查询结果自动重试未知操作，不用模拟检查结果确认 pending。
-- 已移除“新申请推送后回复 y/n”的人工审核，不要与 pending 恢复混淆。
-
-## 配置、命令与运维
-
-- 群配置：运行时快照 → 群 YAML → 命令覆盖 → 旧 JSON 环境配置 → 单组环境配置 → 编号环境配置，最后从实际 YAML 重编译审核阶段。
-- `/设置群` 只有 8 个参数，详见[配置说明](docs/configuration.md)。`custom_reject_uids` 和 `review_pipeline_file` 通过 YAML/环境维护。
-- 普通管理员不能设置群、操作 Cookie 或恢复审批；可以查看配置、检查记录和解除绑定。
-- 阶段通知须显式配置 `effects: [notify_admin]`；模式控制收件人。仅命中退群/冲突不自动推送；严重审批/存储异常仍通知超级管理员。
-- `/检查bili` 不接收申请 QQ，QQ 等级/退群/绑定为 I，不写业务记录，不审批真实请求。
-- 非空 `BILI_COOKIE` 在重启时覆盖运行时 Cookie。CookieCloud 仅为可选兼容；二维码仅做登录引导。
-- SMTP 与 Cookie 检查周期读取 `os.getenv`，必须注入进程环境，见[邮件配置](docs/cookie-email-alert.md)。
-- WebUI 只支持单个实际流程 YAML，条件列表/模式/goto 表单及拖拽排序；不支持表达式、拖线或群基础参数编辑。
-- 日志仅本地按天写入、不自动上传或删除；磁盘监控不清理文件。
-- 部署单实例。迁移完整 data、环境文件、实际 YAML、命令覆盖和服务环境，不能只复制数据库。见[部署说明](docs/deploy-systemd.md)。
-
-## 验证与维护
+默认运行：`uv sync --locked --no-dev` 后 `uv run --locked --no-dev python bot.py`。
+默认安装不得出现 NoneBot；可选适配使用 `uv run --locked --extra legacy python legacy_bot.py`。
 
 ```bash
-uv sync --locked
-uv run --locked python -m unittest discover -s tests
-uv run --locked python -m compileall -q bot.py src tests
-uv run --locked ruff check .
+uv sync --locked --extra legacy
+uv run --locked --extra legacy python -m unittest discover -s tests
+uv run --locked --extra legacy python -m compileall -q bot.py legacy_bot.py app src tests
+uv run --locked --extra legacy ruff check .
 git diff --check
 ```
 
-测试使用 unittest、mock 和临时数据库；不访问真实账号或生产记录。核心测试可独立运行 `uv run --locked python -m unittest discover -s tests -p 'test_core_*.py'`。Windows 控制台设 `PYTHONIOENCODING=utf-8`。
+CI 另在无 legacy 安装上运行全部 `test_v3_*.py`。本地协议测试、真实临时 SQLite、本地 WS/ASGI 与浏览器测试分别报告；均不能冒充真实新用户申请或永久上游兼容性验收。
 
-已有回归覆盖核心独立导入、规则属性、输入路由、拒绝完整性、绑定并发、丢失响应、取消、pending 恢复、配置保存失败、WebUI 和邮件状态。HTTP/QQ 模拟测试不能当作真实业务验收；生产只读查询不能证明真实加群审批已成功。
-
-待开发边界见[功能状态与后续规划](docs/development-roadmap.md)。提交前检查文档正文、示例、帮助文案与模型注释；公开文档不含凭据、真实账号和主机连接信息。
+部署应先冻结最新生产数据、备份完整来源、在副本导入并逐表逐列核对，再切换单实例。详细操作见[部署与回退](docs/deploy-systemd.md)。迁移后不能让旧程序直接打开 v4 数据库。

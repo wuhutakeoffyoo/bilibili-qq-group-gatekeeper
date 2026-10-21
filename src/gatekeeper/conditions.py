@@ -211,4 +211,20 @@ def build_rule_condition_statuses(
         else:
             statuses["no_identity_change"] = RuleConditionStatus("true")
 
+    # Expressions compare observations, never the boolean threshold states.
+    # A missing configured v2 threshold may therefore stay I while a measured
+    # value remains available to a v3 numeric comparison.
+    if "qq_level" in statuses and isinstance(qq_level, (int, float)) and not isinstance(qq_level, bool):
+        statuses["qq_level"].observation = qq_level
+    if (
+        "bili_level" in statuses and bili_search_result.state == "passed"
+        and isinstance(bili_level, (int, float)) and not isinstance(bili_level, bool)
+    ):
+        statuses["bili_level"].observation = bili_level
+    if (
+        "medal" in statuses and medal_result.state in {"passed", "failed"}
+        and isinstance(medal_result.matched_level, (int, float))
+        and not isinstance(medal_result.matched_level, bool)
+    ):
+        statuses["medal"].observation = medal_result.matched_level
     return statuses

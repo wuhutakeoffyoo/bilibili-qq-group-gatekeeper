@@ -2,7 +2,12 @@
 
 ## Status
 
-Accepted
+Historical; the core boundary is retained, while the entry point, configuration
+and pending behavior are superseded by [ADR 0003](0003-standalone-runtime-sql-config.md).
+
+The extraction-only scope and future-work list below describe that earlier
+delivery. V3 defaults to the independent `app/` runtime with SQL configuration,
+expressions and scoped pending; this ADR is not current installation guidance.
 
 ## Context
 

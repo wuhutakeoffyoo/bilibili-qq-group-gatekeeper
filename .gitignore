@@ -33,3 +33,7 @@ test-page.html
 *.local.yaml
 .mimosa/
 .v2c/
+
+# Local browser verification artifacts (may contain session state)
+.playwright-cli/
+output/playwright/

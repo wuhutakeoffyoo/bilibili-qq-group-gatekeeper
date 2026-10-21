@@ -70,6 +70,9 @@ def _format_stage_result_lines(stage_line: str, number: int) -> list[str]:
     condition_ids = raw_conditions.removesuffix("]").split(",") if separator else []
     condition_text = "、".join(CONDITION_CN_NAMES.get(name, name) for name in condition_ids if name) or "未记录"
     mode_text = {"all_pass": "全部通过", "any_pass": "任一通过"}.get(mode, mode)
+    if mode == "when":
+        condition_text = raw_conditions.removesuffix("]")
+        mode_text = "表达式"
     action_text = {
         "approve": "通过申请",
         "reject": "拒绝申请",
@@ -130,6 +133,8 @@ def format_stage_pipeline_text(group_config: GroupConfig) -> str:
     for stage in sorted(group_config.review_stages, key=lambda item: item.index):
         condition_text = "、".join(CONDITION_CN_NAMES.get(name, name) for name in stage.conditions)
         mode_text = "全部通过" if stage.mode == "all_pass" else "任一通过"
+        if stage.when:
+            mode_text, condition_text = "表达式", stage.when
         if lines:
             lines.append("")
         lines.extend(
@@ -205,6 +210,17 @@ def build_stage_reject_reasons(
 ) -> list[str]:
     """Explain the rejecting stage without hiding observations behind custom text."""
     result = list(dict.fromkeys(reason.strip() for reason in reasons if reason.strip()))
+    if stage.when:
+        from .expressions import compile_expression
+
+        explanation = compile_expression(stage.when).explain(statuses)
+        if not any(explanation in reason for reason in result):
+            result.append(explanation)
+        if outcome == "true":
+            result.append(f"已命中本群“{stage.name or '审核阶段'}”的拒绝规则；如需复核，请联系管理员")
+        elif outcome == "unknown":
+            result.append("表达式所需信息暂无法核验，按本群规则暂不接受申请；请稍后重试或联系管理员")
+        return result
     for condition in stage.conditions:
         status = statuses.get(condition)
         if status is None or status.state != outcome or outcome not in {"false", "unknown"}:
@@ -259,8 +275,12 @@ def format_stage_trace(
     outcome_cn = {"true": "通过", "false": "未通过", "unknown": "无法判断"}.get(outcome, outcome)
     action_text = format_branch_action_text(actions, target) or "无动作"
     reason_text = "；".join(reasons) or "无"
-    condition_text = ",".join(stage.conditions)
-    return f"{stage.name} | {stage.mode}[{condition_text}] | {outcome_cn} | {action_text} | {reason_text}"
+    condition_text = stage.when or ",".join(stage.conditions)
+    mode = "when" if stage.when else stage.mode
+    # Keep the v2 trace byte-for-byte stable; expression operators must not
+    # create the delimiter used by the human-readable legacy trace parser.
+    condition_text = condition_text.replace(" | ", " or ") if stage.when else condition_text
+    return f"{stage.name} | {mode}[{condition_text}] | {outcome_cn} | {action_text} | {reason_text}"
 
 
 def format_leave_time(leave_time: str) -> str:
