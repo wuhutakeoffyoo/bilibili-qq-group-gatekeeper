@@ -1,0 +1,23 @@
+# Optional companion NapCat. Keep an existing production NapCat if already used.
+# docker compose --env-file .env.prod -f compose.yaml -f deploy/compose.napcat.yaml up -d --build
+services:
+  gatekeeper:
+    depends_on:
+      - napcat
+    environment:
+      ONEBOT_WS_URLS: '["ws://napcat:3001"]'
+  napcat:
+    image: ${NAPCAT_IMAGE:-mlikiowa/napcat-docker:latest}
+    restart: unless-stopped
+    environment:
+      MODE: ws
+      WEBUI_TOKEN: ${NAPCAT_WEBUI_TOKEN:?Set NAPCAT_WEBUI_TOKEN in the private env file}
+      NAPCAT_UID: ${NAPCAT_UID:-1000}
+      NAPCAT_GID: ${NAPCAT_GID:-1000}
+    ports:
+      - "127.0.0.1:6099:6099"
+    volumes:
+      - ./data/napcat/config:/app/napcat/config
+      - ./data/napcat/qq:/app/.config/QQ
+# First login through http://127.0.0.1:6099/webui (SSH tunnel remotely), then
+# set the OneBot WS server's access token to ONEBOT_ACCESS_TOKEN. No public ports.

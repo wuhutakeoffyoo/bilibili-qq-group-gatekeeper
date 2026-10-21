@@ -1,0 +1,9 @@
+.git
+.venv
+.env
+.env.prod
+*.local.yaml
+data
+logs
+tests
+__pycache__

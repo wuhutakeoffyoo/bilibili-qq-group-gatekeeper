@@ -2,7 +2,12 @@
 
 ## Status
 
-Accepted
+Historical; partially superseded by [ADR 0003](0003-standalone-runtime-sql-config.md).
+
+This document records the V2 decision. The statements below keeping business
+configuration outside SQL and globally pausing on pending outcomes no longer
+describe the default V3 runtime. Current configuration and recovery behavior are
+documented in [configuration](../configuration.md) and [review rules](../review-requirements.md).
 
 ## Context
 

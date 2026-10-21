@@ -172,6 +172,9 @@ class GroupConfig(BaseModel):
     reject_reasons: dict[str, str] = Field(default_factory=dict)  # 按条件补充说明，实际事实和要求仍保留
     review_pipeline_file: str = ""  # 审核分组 YAML 文件
     review_stages: list["ReviewStageConfig"] = Field(default_factory=list)  # 阶段化审核配置
+    verification: dict[str, Any] = Field(default_factory=dict)
+    patrol: dict[str, Any] = Field(default_factory=dict)
+    release_binding_on_leave: bool = False
 
 
 class ReviewStageConfig(BaseModel):
@@ -179,7 +182,8 @@ class ReviewStageConfig(BaseModel):
 
     index: int
     name: str = ""
-    conditions: list[str]
+    conditions: list[str] = Field(default_factory=list)
+    when: str = ""
     mode: str = "all_pass"
     on_true: list[str] = Field(default_factory=lambda: ["next"])
     on_false: list[str] = Field(default_factory=lambda: ["reject"])
@@ -202,7 +206,16 @@ class ReviewStageConfig(BaseModel):
             target = getattr(self, f"{field_name}_target")
             if target is not None and flow_actions[0] != "next":
                 raise ValueError(f"{field_name}_target 仅能与 next 流转动作一起使用")
-        self.conditions = parse_condition_list(self.conditions)
+        if self.when.strip():
+            from .expressions import compile_expression
+
+            self.when = self.when.strip()
+            expression = compile_expression(self.when)
+            # An expression owns its dependencies; a stale v2 list must not
+            # silently fetch or explain unrelated conditions.
+            self.conditions = list(expression.conditions)
+        else:
+            self.conditions = parse_condition_list(self.conditions)
         if self.mode not in STAGE_MODES:
             raise ValueError("stage mode 必须是 all_pass 或 any_pass")
         return self

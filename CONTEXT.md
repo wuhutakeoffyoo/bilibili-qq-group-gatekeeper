@@ -12,7 +12,7 @@ per-group review pipelines. A supported deployment runs one Bot process.
   admission decision. An incomplete or unavailable query cannot establish a miss.
 - **Condition**: a configured rule evaluated as T (`true`), F (`false`), or
   I (`unknown`). Missing evidence and failed identity lookups remain unknown.
-- **Review stage**: a named group of conditions, aggregation mode, and one branch
+- **Review stage**: a named v2 condition aggregation or v3 safe AST expression, and one branch
   for each T/F/I result. A branch has one flow action and optional side effects.
 - **Flow action**: `next`, `approve`, `reject`, or `ignore`. `next` can select a
   configured target stage. A reached cycle or missing target is an error.
@@ -38,17 +38,33 @@ per-group review pipelines. A supported deployment runs one Bot process.
 ## Implementation boundaries
 
 `src/gatekeeper/` owns framework-independent models, condition calculation,
-pipeline traversal, formatting, input parsing, and durable decision orchestration.
+pipeline traversal, safe Kleene expressions, formatting, input parsing and locks.
 Its imports do not register handlers or create runtime files.
 
-`src/plugins/group_request_manager/` owns NoneBot registration, OneBot event and
-exception translation, Bilibili HTTP, SQLite, configuration I/O, WebUI, and workers.
-The plugin composes the core with external adapters; the core never imports the
-plugin. See [ADR 0002](docs/adr/0002-framework-independent-core.md).
+`app/` owns standalone application services, versioned SQLite configuration,
+records, request-specific recovery, Bilibili adapters, OneBot transport and one
+FastAPI lifecycle for administration, reverse WS and the ownership gateway.
+`bot.py` starts this runtime without NoneBot. `legacy_bot.py` explicitly loads the
+optional `app/nonebot_adapter.py` event/action bridge into the same services.
+The archived `src/plugins/group_request_manager/` implementation is regression
+material and must not open a migrated v4 database. See
+[ADR 0003](docs/adr/0003-standalone-runtime-sql-config.md).
+
+SQLite v4 preserves all v3 business rows and imports the effective legacy
+configuration once. Subsequent edits use CAS-protected immutable revisions.
+Business rollback preserves the live credential bundle. Timeout isolates only
+the affected identities; exact request evidence is required for recovery or the
+single permitted external replay. Membership alone is insufficient.
+
+Optional ownership evidence does not bypass admission rules. Applicant QR
+credentials are ephemeral and isolated from operator credentials. Patrol is
+disabled by default, uses an explicit qualification expression, confirmed
+group-specific identity and fresh member/evidence checks; unknown observations
+never independently authorize a removal.
 
 Current operator-facing behavior is documented in the
 [review rules](docs/review-requirements.md),
 [configuration sources](docs/configuration.md), and
 [rejection feedback](docs/rejection-feedback.md). Historical plans are separately
-archived; an independent business core does not imply an independent OneBot entry
-point or database-backed configuration.
+archived. Current implementation and validation boundaries are recorded in
+[the implementation matrix](docs/v3-implementation.md).

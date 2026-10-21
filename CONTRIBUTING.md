@@ -15,13 +15,15 @@
 
 ```bash
 uv sync --locked
-uv run --locked python -m unittest discover -s tests
-uv run --locked python -m compileall -q bot.py src tests
+uv run --locked python -m unittest discover -s tests -p 'test_v3_*.py'
+uv sync --locked --extra legacy
+uv run --locked --extra legacy python -m unittest discover -s tests
+uv run --locked --extra legacy python -m compileall -q bot.py legacy_bot.py app src tests
 uv run --locked ruff check .
 git diff --check
 ```
 
-真实配置应写入被 Git 忽略的 `.env.prod` 和 `*.local.yaml`。提交前请确认示例配置只包含占位值，不要提交真实群号、凭据或运行数据。
+基础设施配置放在被 Git 忽略的 `.env.prod`。首次迁移后业务配置以 SQLite 为准，使用管理台或版本化配置接口修改。不要提交 SQLite、私有导出、迁移备份、真实群号或凭证。默认安装不得安装 NoneBot；`legacy` 仅用于显式兼容入口及旧行为回归。
 
 ## Pull Request
 

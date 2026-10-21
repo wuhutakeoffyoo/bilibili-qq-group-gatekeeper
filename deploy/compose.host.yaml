@@ -1,0 +1,11 @@
+# Linux host networking keeps the admin listener on actual loopback.
+# Usage: docker compose --env-file .env.prod -f compose.yaml -f deploy/compose.host.yaml up -d --build
+services:
+  gatekeeper:
+    network_mode: host
+    ports: !reset []
+    environment:
+      HOST: 127.0.0.1
+      PORT: 1128
+      WEBUI_HOST: 127.0.0.1
+      WEBUI_ENABLED: ${WEBUI_ENABLED:-false}

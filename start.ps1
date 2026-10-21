@@ -47,6 +47,8 @@ if (-not (Test-Path -LiteralPath ".env.prod")) {
 }
 
 Write-Host "正在同步依赖..." -ForegroundColor Cyan
-uv sync --locked
+uv sync --locked --no-dev
+if ($LASTEXITCODE -ne 0) { throw "依赖同步失败，未启动机器人。" }
 Write-Host "正在启动 Bilibili QQ Group Gatekeeper..." -ForegroundColor Green
-uv run python bot.py
+uv run --locked --no-dev python bot.py
+exit $LASTEXITCODE

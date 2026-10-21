@@ -3,6 +3,7 @@
 from collections.abc import Generator
 
 from .config import GroupConfig
+from .expressions import compile_expression
 from .formatters import format_stage_trace
 from .models import (
     PipelineStep,
@@ -14,7 +15,9 @@ from .models import (
 
 
 def evaluate_stage_conditions(stage: StageRuntime, condition_statuses: dict[str, RuleConditionStatus]) -> str:
-    """按分组模式汇总 T/F/I，不解析任何布尔表达式。"""
+    """Evaluate an optional v3 expression, preserving v2 aggregation verbatim."""
+    if stage.when:
+        return compile_expression(stage.when).evaluate(condition_statuses)
     states = [condition_statuses[name].state for name in stage.conditions]
     if stage.mode == "all_pass":
         if "false" in states:
@@ -44,12 +47,13 @@ def build_stage_runtime(
     on_true_reason: str = "",
     on_false_reason: str = "",
     on_unknown_reason: str = "",
+    when: str = "",
 ) -> StageRuntime:
     """编译单个审核阶段。"""
     return StageRuntime(
         index=index,
         name=name or f"阶段{index}",
-        conditions=list(conditions),
+        conditions=list(compile_expression(when).conditions) if when else list(conditions),
         mode=mode,
         on_true=on_true,
         on_false=on_false,
@@ -60,6 +64,7 @@ def build_stage_runtime(
         on_true_reason=on_true_reason,
         on_false_reason=on_false_reason,
         on_unknown_reason=on_unknown_reason,
+        when=when,
     )
 
 
@@ -103,6 +108,7 @@ def get_review_stages(group_config: GroupConfig) -> list[StageRuntime]:
             on_true_reason=stage.on_true_reason,
             on_false_reason=stage.on_false_reason,
             on_unknown_reason=stage.on_unknown_reason,
+            when=stage.when,
         )
         for stage in sorted(group_config.review_stages, key=lambda item: item.index)
     ]
@@ -114,7 +120,7 @@ def collect_pipeline_conditions(stages: list[StageRuntime]) -> set[str]:
     """收集整个审核管线中用到的条件。"""
     conditions: set[str] = set()
     for stage in stages:
-        conditions.update(stage.conditions)
+        conditions.update(compile_expression(stage.when).conditions if stage.when else stage.conditions)
     return conditions
 
 
@@ -156,6 +162,7 @@ def resolve_stage_reasons(
     stage: StageRuntime,
     outcome: str,
     referenced_statuses: list[RuleConditionStatus],
+    condition_statuses: dict[str, RuleConditionStatus] | None = None,
 ) -> list[str]:
     """生成阶段结果对应的原因列表。"""
     override_reason = {
@@ -163,6 +170,9 @@ def resolve_stage_reasons(
         "false": stage.on_false_reason,
         "unknown": stage.on_unknown_reason,
     }.get(outcome, "")
+    if stage.when:
+        explanation = compile_expression(stage.when).explain(condition_statuses or {})
+        return [override_reason, explanation] if override_reason else [explanation]
     if override_reason:
         return [override_reason]
 
@@ -208,7 +218,7 @@ def iter_pipeline(
             condition_statuses[name] for name in current_stage.conditions if name in condition_statuses
         ]
         outcome = evaluate_stage_conditions(current_stage, condition_statuses)
-        reasons = resolve_stage_reasons(current_stage, outcome, referenced_statuses)
+        reasons = resolve_stage_reasons(current_stage, outcome, referenced_statuses, condition_statuses)
         actions = get_stage_outcome_actions(current_stage, outcome)
         # The original dispatcher validated flows after recording their trace.
         planned_flow = next(

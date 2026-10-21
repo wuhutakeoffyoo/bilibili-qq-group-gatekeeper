@@ -59,6 +59,6 @@ PY
 fi
 
 echo "正在同步依赖..."
-uv sync --locked
+uv sync --locked --no-dev
 echo "正在启动 Bilibili QQ Group Gatekeeper..."
-exec uv run python bot.py
+exec uv run --locked --no-dev python bot.py

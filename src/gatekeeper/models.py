@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Protocol
 
 
@@ -22,6 +22,9 @@ class RuleConditionStatus:
 
     state: str
     reason: str = ""
+    # Raw measurements are distinct from the legacy threshold result. Keeping
+    # them out of equality preserves the old public T/F/I value contract.
+    observation: int | float | None = field(default=None, compare=False)
 
 
 @dataclass
@@ -41,6 +44,7 @@ class StageRuntime:
     on_true_reason: str = ""
     on_false_reason: str = ""
     on_unknown_reason: str = ""
+    when: str = ""
 
 
 @dataclass
