@@ -173,9 +173,10 @@ class CommandService:
             import base64
             import io
             import qrcode
+            from qrcode.image.pure import PyPNGImage
 
             output = io.BytesIO()
-            qrcode.make(session['url']).save(output, format='PNG')
+            qrcode.make(session['url'], image_factory=PyPNGImage).save(output)
             encoded = base64.b64encode(output.getvalue()).decode('ascii')
             if self.task_factory:
                 self.task_factory(self._poll_qrcode(actor, session["session_id"]), name="administrator-qr-login")

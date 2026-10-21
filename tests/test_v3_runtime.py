@@ -245,6 +245,22 @@ class RuntimeWorkflowTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(ConfigManager.get_group_config("10").required_qq_level, 35)
         self.assertNotIn("SESSDATA", await commands.dispatch("1", message(1, "/查看配置")))
 
+    async def test_administrator_qr_reply_contains_a_decodable_png_without_pillow(self):
+        import base64
+        import png
+        self.service.credentials = SimpleNamespace(start_qr_login=AsyncMock(return_value={
+            'url': 'https://example.invalid/native-login', 'session_id': 'fixture-session'}))
+        commands = CommandService(self.service)
+        reply = await commands.dispatch('1', {'message_type': 'private', 'user_id': 1, 'message': '/登录二维码'})
+        encoded = reply.split('[CQ:image,file=base64://', 1)[1].split(']', 1)[0]
+        image = base64.b64decode(encoded, validate=True)
+        self.assertTrue(image.startswith(b'\x89PNG\r\n\x1a\n'))
+        width, height, rows, info = png.Reader(bytes=image).read()
+        self.assertEqual(width, height)
+        self.assertGreater(width, 100)
+        self.assertEqual(len(list(rows)), height)
+        self.assertEqual(info['bitdepth'], 1)
+
     async def test_decrease_records_departure_and_invokes_policy_hook(self):
         await self.runtime.handle_event({"post_type": "notice", "notice_type": "group_decrease", "group_id": 10, "user_id": 200}, self.client)
         self.assertIsNotNone(LeaveRecordManager.get_leave_record("10", "200"))
