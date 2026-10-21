@@ -104,6 +104,34 @@ class StorageTests(unittest.TestCase):
         self.assertEqual(JoinRequestRecordManager.get_bili_binding(30).owner_qq, "20")
         self.assertEqual(JoinRequestRecordManager.get_user_binding("20").approved_count, 1)
 
+    def test_migration_gate_only_accepts_verified_pipeline_file_relocation(self):
+        from deploy.verify_migration import config_differences
+        old, new = self.root / 'old-release', self.root / 'new-release'
+        old.mkdir()
+        new.mkdir()
+        source, target = old / 'review.yaml', new / 'review.yaml'
+        source.write_bytes(b'unchanged review rules\n')
+        target.write_bytes(source.read_bytes())
+        before = {'groups': {'10': {'review_pipeline_file': str(source), 'required_qq_level': 32}}}
+        after = {'groups': {'10': {'review_pipeline_file': str(target), 'required_qq_level': 32}}}
+        field = 'config.groups.10.review_pipeline_file'
+        self.assertEqual(config_differences(before, after), [field])
+        relocated = []
+        self.assertEqual(config_differences(before, after, relocate_roots=(old, new), relocated=relocated), [])
+        self.assertEqual(relocated[0]['path'], field)
+        after['groups']['10']['required_qq_level'] = 0
+        self.assertEqual(config_differences(before, after, relocate_roots=(old, new)), ['config.groups.10.required_qq_level'])
+        after['groups']['10']['required_qq_level'] = 32
+        target.write_bytes(b'changed rules\n')
+        self.assertEqual(config_differences(before, after, relocate_roots=(old, new)), [field])
+        target.unlink()
+        self.assertEqual(config_differences(before, after, relocate_roots=(old, new)), [field])
+        target.write_bytes(source.read_bytes())
+        after['groups']['10']['review_pipeline_file'] = str(source)
+        self.assertEqual(config_differences(before, after, relocate_roots=(old, new)), [])
+        # An unrelated path field never gets a generic string-prefix exception.
+        self.assertEqual(config_differences({'token': str(source)}, {'token': str(target)}, relocate_roots=(old, new)), ['config.token'])
+
     def test_future_schema_is_rejected_before_changing_persistent_journal_mode(self):
         with closing(sqlite3.connect(self.path)) as connection:
             connection.execute("PRAGMA user_version = 5")

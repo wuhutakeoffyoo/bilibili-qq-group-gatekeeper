@@ -106,6 +106,8 @@ python deploy/verify_migration.py before.sqlite3 after.sqlite3 --config-before e
 
 基线 JSON 为旧有效 `PluginConfig.model_dump()` 的私有文件。工具逐个旧表的全部原有列/行比较数量和散列，检查完整性与旧配置字段，只输出差异字段路径、不输出值。应用开始处理新事件后，行内容可能合法变化；完整迁移比较应在切换前完成。
 
+使用新的发布目录时，可额外传 `--relocate-root /旧发布目录 /新发布目录`。此参数只接受群 `review_pipeline_file` 的已验证迁移：必须均为绝对路径、处于对应根目录、相对路径相同、文件存在且 SHA256 完全一致；报告列出验证过的字段与散列。编译规则和其他字段仍要求严格一致，缺文件、内容变化和其他字符串替换都不能通过。
+
 ### 冻结最新数据再切换
 
 ```bash

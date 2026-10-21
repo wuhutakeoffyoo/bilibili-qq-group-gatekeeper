@@ -10,6 +10,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import re
 import sqlite3
 from pathlib import Path
 
@@ -34,21 +35,39 @@ def digest(connection, table, columns):
     return len(rows), hashlib.sha256('\n'.join(sorted(rows)).encode()).hexdigest()
 
 
-def config_differences(before, after, path='config'):
+def config_differences(before, after, path='config', *, relocate_roots=None, relocated=None):
     if isinstance(before, dict):
         if not isinstance(after, dict):
             return [path]
         return [difference for key, value in before.items()
-                for difference in config_differences(value, after.get(key), path + '.' + str(key))]
+                for difference in config_differences(value, after.get(key), path + '.' + str(key),
+                    relocate_roots=relocate_roots, relocated=relocated)]
     if isinstance(before, list):
         if not isinstance(after, list) or len(before) != len(after):
             return [path]
         return [difference for index, (left, right) in enumerate(zip(before, after))
-                for difference in config_differences(left, right, path + '[' + str(index) + ']')]
-    return [] if before == after else [path]
+                for difference in config_differences(left, right, path + '[' + str(index) + ']',
+                    relocate_roots=relocate_roots, relocated=relocated)]
+    if before == after:
+        return []
+    if (relocate_roots and isinstance(before, str) and isinstance(after, str)
+            and re.fullmatch(r'config\.groups\.[^.]+\.review_pipeline_file', path)):
+        source_root, target_root = (Path(root).resolve() for root in relocate_roots)
+        source, target = Path(before), Path(after)
+        if source.is_absolute() and target.is_absolute():
+            source, target = source.resolve(), target.resolve()
+            if (source.is_relative_to(source_root) and target.is_relative_to(target_root)
+                    and source.relative_to(source_root) == target.relative_to(target_root)
+                    and source.is_file() and target.is_file()):
+                source_hash = hashlib.sha256(source.read_bytes()).hexdigest()
+                if source_hash == hashlib.sha256(target.read_bytes()).hexdigest():
+                    if relocated is not None:
+                        relocated.append({'path': path, 'sha256': source_hash})
+                    return []
+    return [path]
 
 
-def compare(before_path, after_path, config_before=None):
+def compare(before_path, after_path, config_before=None, *, relocate_roots=None):
     before, after = connect(before_path), connect(after_path)
     try:
         result = {'before_schema': before.execute('PRAGMA user_version').fetchone()[0],
@@ -68,9 +87,12 @@ def compare(before_path, after_path, config_before=None):
         if config_before:
             baseline = json.loads(Path(config_before).read_text(encoding='utf-8-sig'))
             current = after.execute('SELECT r.config_json FROM config_head h JOIN config_revisions r ON r.version=h.version WHERE h.singleton=1').fetchone()
-            differences = config_differences(baseline, json.loads(current[0]) if current else None)
+            relocated = []
+            differences = config_differences(baseline, json.loads(current[0]) if current else None,
+                relocate_roots=relocate_roots, relocated=relocated)
             # Field paths may be operational identifiers; do not print values.
-            result['config'] = {'ok': not differences, 'differing_paths': differences[:100], 'difference_count': len(differences)}
+            result['config'] = {'ok': not differences, 'differing_paths': differences[:100],
+                               'difference_count': len(differences), 'verified_file_relocations': relocated}
             result['ok'] = result['ok'] and not differences
         return result
     finally:
@@ -83,9 +105,11 @@ def main():
     parser.add_argument('before')
     parser.add_argument('after')
     parser.add_argument('--config-before')
+    parser.add_argument('--relocate-root', nargs=2, metavar=('OLD_ROOT', 'NEW_ROOT'),
+                        help='Allow only same-relative-path, byte-identical group review pipeline file relocation')
     args = parser.parse_args()
     try:
-        result = compare(args.before, args.after, args.config_before)
+        result = compare(args.before, args.after, args.config_before, relocate_roots=args.relocate_root)
     except (ValueError, sqlite3.Error, OSError):
         print(json.dumps({'ok': False, 'error': 'Migration parity comparison could not complete; inspect private inputs locally'}))
         return 1
