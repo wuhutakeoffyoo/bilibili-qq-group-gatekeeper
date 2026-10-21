@@ -17,6 +17,7 @@ from typing import Optional
 
 import httpx
 import qrcode
+from qrcode.image.pure import PyPNGImage
 from cryptography.hazmat.primitives import padding
 from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 
@@ -43,6 +44,7 @@ class CookieManager:
         """根据登录链接构造二维码对象，供图片和终端输出复用。"""
         qr = qrcode.QRCode(
             version=1,
+            image_factory=PyPNGImage,
             error_correction=qrcode.constants.ERROR_CORRECT_L,
             box_size=2,
             border=2,
