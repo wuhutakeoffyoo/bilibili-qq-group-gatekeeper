@@ -1,9 +1,14 @@
 .git
 .venv
-.env
-.env.prod
+**/.env
+**/.env.*
+!.env.example
+!.env.prod.example
 *.local.yaml
 data
+data-before-seed-*
 logs
 tests
-__pycache__
+**/__pycache__
+.playwright-cli
+output
