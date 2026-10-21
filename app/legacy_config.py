@@ -819,4 +819,3 @@ class LegacyConfigLoader:
         cls._refresh_review_stages(file_config)
 
         cls._config = file_config
-
