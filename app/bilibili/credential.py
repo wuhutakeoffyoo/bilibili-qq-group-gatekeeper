@@ -101,13 +101,22 @@ class CookieManager:
 
     @classmethod
     def _build_cookiecloud_key(cls, uuid: str, password: str) -> bytes:
-        """按 CookieCloud 官方规则生成解密主密钥。"""
+        """CookieCloud wire compatibility only; not a password-storage KDF.
+
+        The upstream protocol requires MD5 here, including its fixed-IV mode.
+        Changing it locally prevents decryption. See SECURITY.md for the
+        documented protocol constraint; do not reuse this for new encryption.
+        """
         hash_str = hashlib.md5(f"{uuid}-{password}".encode()).hexdigest()
         return hash_str[:16].encode()
 
     @classmethod
     def _evp_bytes_to_key(cls, password: bytes, salt: bytes, key_len: int, iv_len: int) -> tuple[bytes, bytes]:
-        """兼容 CookieCloud legacy 模式使用的 OpenSSL EVP_BytesToKey 派生方式。"""
+        """Decode existing CookieCloud legacy ciphertext; never create new data.
+
+        MD5 is fixed by OpenSSL EVP_BytesToKey/CryptoJS compatibility, not a
+        password-storage choice. This weaker protocol is documented separately.
+        """
         key_iv = b""
         prev = b""
         while len(key_iv) < key_len + iv_len:
