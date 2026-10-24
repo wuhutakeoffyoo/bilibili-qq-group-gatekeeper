@@ -217,7 +217,9 @@ class BiliApi:
             return CheckResult("inaccessible", "B站UID资料不完整，无法确认账号和等级")
         if actual_uid != requested_uid:
             return CheckResult("inaccessible", "B站UID查询结果与输入不一致，无法确认账号")
-        return CheckResult("passed", matched_target_uid=actual_uid, matched_level=level)
+        name = card.get("name")
+        name = name.strip() if isinstance(name, str) else ""
+        return CheckResult("passed", matched_target_uid=actual_uid, matched_level=level, matched_name=name or None)
 
     async def _get_wbi_keys(self) -> Optional[tuple[str, str]]:
         """获取 Wbi 签名密钥；进程内缓存定期刷新，nav 失败时返回 None。"""
@@ -352,7 +354,8 @@ class BiliApi:
         except (KeyError, ValueError, TypeError):
             logger.warning("无法从搜索结果中解析 UID 或等级, keyword=%s, user=%s", keyword, selected_user)
             return CheckResult("inaccessible", "B站账号资料不完整，无法读取 UID 或等级")
-        return CheckResult("passed", matched_target_uid=uid, matched_level=level)
+        return CheckResult("passed", matched_target_uid=uid, matched_level=level,
+                           matched_name=str(selected_user["uname"]).strip())
 
     async def search_user(self, keyword: str) -> Optional[int]:
         """根据昵称搜索 B 站用户，返回匹配的 UID。

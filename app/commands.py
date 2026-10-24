@@ -11,7 +11,7 @@ from app.database.async_storage import run_storage
 from app.database.leaves import LeaveRecordManager
 from app.database.records import JoinRequestRecordManager
 from app.onebot.events import OneBotEvent
-from app.reports import format_user_check_reply
+from app.reports import format_user_check_reply, needs_profile_name
 from src.gatekeeper.config import GroupConfig
 from src.gatekeeper.decision_runtime import identity_decision_keys
 from src.gatekeeper.formatters import format_group_config
@@ -241,7 +241,25 @@ class CommandService:
     async def check_qq(self, actor, raw):
         qq = self.require_qq(raw, "用法：/检查qq <QQ号>")
         binding, summary, audits = await run_storage(JoinRequestRecordManager.get_user_report, qq, 5)
-        return format_user_check_reply(qq, binding, summary, audits)
+        profiles = ([(binding.latest_bili_name, binding.latest_bili_uid)] if binding else [])
+        profiles += [(audit.bili_name, audit.bili_uid) for audit in audits]
+        uids = list(dict.fromkeys(uid for name, uid in profiles if needs_profile_name(name, uid)))
+        resolved_names = {}
+        cookie = self.config.get_bili_cookie()
+
+        async def resolve_names():
+            for uid in uids:
+                profile = await self.service.bili_requests.run(cookie,
+                    lambda api, uid=uid: api.resolve_user_profile(f"UID:{uid}"), cache_scope="report:profile")
+                if profile.state == "passed" and profile.matched_target_uid == uid and profile.matched_name:
+                    resolved_names[uid] = profile.matched_name
+
+        if cookie and uids:
+            try:
+                await asyncio.wait_for(resolve_names(), timeout=8)
+            except Exception:
+                logger.warning("Unable to resolve historical UID display names; keeping the stored report")
+        return format_user_check_reply(qq, binding, summary, audits, resolved_names=resolved_names)
 
     async def check_bili(self, actor, raw):
         args = split_arguments(raw)

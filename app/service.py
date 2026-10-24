@@ -165,9 +165,11 @@ class GatekeeperService:
 
     async def populate_bili_context(self, context, conditions, cookie, *, lookup_bindings=True):
         async def populate(api: BiliApi):
-            context.bili_search_result = await api.resolve_user_profile(context.bili_name or "")
+            context.input_bili_name = context.input_bili_name or context.bili_name
+            context.bili_search_result = await api.resolve_user_profile(context.input_bili_name or "")
             context.bili_uid = context.bili_search_result.matched_target_uid
             context.bili_level = context.bili_search_result.matched_level
+            context.bili_name = context.bili_search_result.matched_name or ""
             if not context.bili_uid:
                 return
             group = context.group_config
@@ -236,7 +238,8 @@ class GatekeeperService:
         if dispatch.flow_action == "reject":
             reasons = self.reject_reasons(context, reasons, stage=stage, outcome=outcome)
         return (f"审核阶段命中通知\n群号：{context.group_id}\n申请 QQ：{context.user_id}"
-                f"\nB站昵称：{context.bili_name or '未填写'}\nB站 UID：{context.bili_uid or '未记录'}"
+                f"\n申请填写：{context.input_bili_name or '未填写'}"
+                f"\nB站昵称：{context.bili_name or '未确认'}\nB站 UID：{context.bili_uid or '未记录'}"
                 f"\n阶段：{stage.name}\n分组模式：{stage.mode}\n条件：{'、'.join(stage.conditions)}"
                 f"\n结果：{dict(true='通过', false='未通过', unknown='无法判断').get(outcome, outcome)}"
                 f"\n动作：{format_flow_action_text(dispatch.flow_action, dispatch.target_stage_index)}"
@@ -351,7 +354,8 @@ class GatekeeperService:
         if not group or not group.enabled:
             return
         context = JoinRequestContext(group_id, user_id, group, bot=bot, event=event,
-                                     actor_qq_for_binding=user_id, bili_name=extract_bili_name(getattr(event, "comment", "") or ""))
+                                     actor_qq_for_binding=user_id,
+                                     input_bili_name=extract_bili_name(getattr(event, "comment", "") or ""))
         try:
             stages = get_review_stages(group)
         except ValueError as exc:
@@ -364,10 +368,10 @@ class GatekeeperService:
             context.leave_record = await run_storage(LeaveRecordManager.get_leave_record, group_id, user_id)
             context.leave_status = "matched" if context.leave_record else "clear"
         if requires_bili_identity(conditions) or self.ownership_required(group) or group.custom_reject_uids:
-            possible_qq = mistaken_qq_input(context.bili_name, user_id)
+            possible_qq = mistaken_qq_input(context.input_bili_name, user_id)
             if possible_qq:
                 context.bili_search_result = possible_qq
-            elif not context.bili_name:
+            elif not context.input_bili_name:
                 context.bili_search_result = CheckResult("failed", ACCOUNT_REQUIRED_MESSAGE)
             else:
                 cookie = self.config.get_bili_cookie()
@@ -429,7 +433,7 @@ class GatekeeperService:
         stages = get_review_stages(group)
         conditions = collect_pipeline_conditions(stages)
         context = JoinRequestContext(group_id, str(qq or ""), group, dry_run=True,
-                                     input_bili_name=str(answer), bili_name=str(answer).strip(),
+                                     input_bili_name=str(answer).strip(),
                                      actor_qq_for_binding=str(qq or ""))
         if qq:
             if "qq_level" in conditions:
@@ -438,10 +442,10 @@ class GatekeeperService:
                 context.leave_record = await run_storage(LeaveRecordManager.get_leave_record, group_id, str(qq))
                 context.leave_status = "matched" if context.leave_record else "clear"
         if requires_bili_identity(conditions) or self.ownership_required(group) or group.custom_reject_uids:
-            possible_qq = mistaken_qq_input(context.bili_name, str(qq) if qq else None)
+            possible_qq = mistaken_qq_input(context.input_bili_name, str(qq) if qq else None)
             if possible_qq:
                 context.bili_search_result = possible_qq
-            elif not context.bili_name:
+            elif not context.input_bili_name:
                 context.bili_search_result = CheckResult("failed", ACCOUNT_REQUIRED_MESSAGE)
             elif not self.config.get_bili_cookie():
                 context.bili_search_result = CheckResult("inaccessible", "未配置可用的 B站 Cookie")
@@ -475,6 +479,7 @@ class GatekeeperService:
         lines = ["【B站审核测试】", f"群号：{group_id}", f"B站输入：{answer}"]
         if context.bili_uid:
             lines.append(f"B站 UID：{context.bili_uid}")
+            lines.append(f"B站昵称：{context.bili_name or '未获取到昵称'}")
         if context.bili_level is not None:
             lines.append(f"B站等级：{context.bili_level}")
         lines += ["", "【条件结果】", *format_condition_details(context.condition_states, context.condition_reasons),
@@ -487,7 +492,7 @@ class GatekeeperService:
         if ownership_required:
             lines.append("说明：本次仅模拟资格规则；所有权验证不会在模拟中创建、消费或确认，实际申请仍须完成本群所有权验证。")
         return {"group_id": group_id, "qq": str(qq) if qq else None, "answer": str(answer),
-                "bili_uid": context.bili_uid, "bili_level": context.bili_level, "action": action,
+                "bili_uid": context.bili_uid, "bili_name": context.bili_name, "bili_level": context.bili_level, "action": action,
                 "outcome": outcome, "reasons": reasons, "condition_states": context.condition_states,
                 "condition_reasons": context.condition_reasons, "stage_results": context.stage_results,
                 "incomplete": incomplete, "ownership_verification": "not_simulated" if ownership_required else "disabled",
