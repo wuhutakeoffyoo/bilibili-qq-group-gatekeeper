@@ -14,6 +14,8 @@ class CheckResult:
     detail: str = ""
     matched_target_uid: int | None = None
     matched_level: int | None = None
+    # Canonical profile name returned with the verified UID; never the raw answer.
+    matched_name: str | None = None
 
 
 @dataclass
