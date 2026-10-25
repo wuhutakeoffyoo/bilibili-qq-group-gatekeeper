@@ -40,6 +40,8 @@ uv run --locked --no-dev python bot.py
 
 `Restart=on-failure` 只负责退出恢复，不能证明 NapCat 下游处理正常。`/healthz` 也不证明 Cookie、动作回执与业务状态正确。
 
+启动后后台每 30 秒检查 QQ 在线及健康状态；首次就绪、OneBot 重连或观察到 QQ 离线后恢复时补扫 NapCat 未处理入群申请。检查 `Startup/reconnect request scan` 日志和审计/实际回执，不能只看容器 `Up` 或 `onebot_connected`。查询失败会重试；需扫码时仍须恢复 QQ 登录。补审会真实执行当前规则允许的审批及通知，上线前须核对群规则。窗口与去重边界见[审核恢复规则](review-requirements.md#启动与重连补审)。
+
 ## 管理台与反向代理
 
 ASGI、管理台、反向 WS 和 H5 共用端口。管理台实际监听与 SQL `webui_host` 均须回环；HTTP 本机访问，远程通过同机可信 HTTPS 代理。启用代理信任只影响回环对端，不能把任意公网转发头视为可信。

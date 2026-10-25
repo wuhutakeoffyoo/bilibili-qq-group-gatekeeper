@@ -13,6 +13,7 @@ from app.database.legacy import initialize_database
 from app.onebot.client import OneBotClient
 from app.onebot.events import OneBotEvent
 from app.onebot.napcat import NapCatRequestInspector
+from app.onebot.recovery import MissedRequestRecovery
 from app.settings import get_settings
 
 logger = logging.getLogger(__name__)
@@ -35,6 +36,7 @@ class Runtime:
         self.credentials = credentials
         self.request_inspector = NapCatRequestInspector(self.get_client)
         self.reconciler = None
+        self.request_recovery = MissedRequestRecovery(self)
         self.background_enabled = background_enabled
         self.started = False
         self._tasks: set[asyncio.Task] = set()
@@ -120,6 +122,7 @@ class Runtime:
 
                 monitor.reset_dedup_state()
                 self.reconciler.start()
+                self.spawn(self.request_recovery.loop(), name="missed-group-requests")
                 self.spawn(self._disk_monitor(), name="disk-monitor")
                 self.spawn(self._cookie_monitor(), name="bilibili-cookie-monitor")
                 self.spawn(self.credentials.loop(), name="bilibili-credentials")

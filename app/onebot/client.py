@@ -53,6 +53,7 @@ class OneBotClient:
         self._send_lock = asyncio.Lock()
         self._session_lock = asyncio.Lock()
         self._closed = False
+        self.connection_generation = 0
 
     @property
     def connected(self) -> bool:
@@ -121,6 +122,7 @@ class OneBotClient:
             raise OneBotDisconnected("another session is already attached")
         async with self._session_lock:
             self._transport = transport
+            self.connection_generation += 1
             self._connected.set()
             session_self_id = self._expected_self_id
             try:

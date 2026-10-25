@@ -24,7 +24,7 @@ from src.gatekeeper.conditions import (
     build_rule_condition_statuses, requires_bili_identity,
 )
 from src.gatekeeper.config import GroupConfig, parse_bool
-from src.gatekeeper.decision_runtime import identity_decision_keys
+from src.gatekeeper.decision_runtime import DecisionLocks, identity_decision_keys
 from src.gatekeeper.decisions import DecisionRequest, DefiniteActionFailure
 from src.gatekeeper.formatters import (
     build_reject_reason, build_stage_reject_reasons, format_action_text,
@@ -112,6 +112,7 @@ class GatekeeperService:
         self.ownership = None
         self.patrol = None
         self.credentials = None
+        self.request_locks = DecisionLocks()
 
     @staticmethod
     def ownership_required(group):
@@ -272,7 +273,10 @@ class GatekeeperService:
         if context.dry_run or context.bot is None or context.event is None:
             return
         if flow_action == "ignore":
+            request = DecisionRequest(str(context.bot.self_id), context.group_id,
+                                      str(context.event.sub_type), str(context.event.flag))
             audit = await run_storage(JoinRequestRecordManager.add_audit,
+                                     request_key=request.request_key,
                                      **self.audit_kwargs(context, result="ignored", reasons=reasons or ["按阶段配置忽略"]))
             if audit is None:
                 await self.notify_admins(context.bot, f"严重：QQ {context.user_id} 的忽略审计写入失败，请检查 SQLite 和磁盘空间。")
@@ -349,6 +353,18 @@ class GatekeeperService:
             event = OneBotEvent(event)
         if getattr(event, "sub_type", "") != "add":
             return
+        request = DecisionRequest(str(bot.self_id), str(event.group_id), "add", str(getattr(event, "flag", "")))
+        if not request.request_key:
+            logger.warning("Ignoring group request without an exact request identity")
+            return
+        # Separate outer locks avoid nesting the decision service's identity locks.
+        # Live events and startup catch-up share this entire evaluation boundary.
+        async with self.request_locks.hold(request.request_key):
+            if await run_storage(JoinRequestRecordManager.get_request_audit, request.request_key):
+                return
+            await self._handle_group_request(bot, event)
+
+    async def _handle_group_request(self, bot, event):
         group_id, user_id = str(event.group_id), str(event.user_id)
         group = self.config.get_group_config(group_id)
         if not group or not group.enabled:
