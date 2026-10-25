@@ -7,6 +7,7 @@
 | 能力 | 当前实现 | 已有验证 |
 | --- | --- | --- |
 | 独立通信与统一 ASGI | `app/main.py`、`app/runtime.py`、`app/onebot/`；正反向 WS、echo、重连、事件队列和生命周期 | `test_v3_onebot.py`、`test_v3_runtime.py`；默认依赖的干净环境中无 NoneBot，工厂可创建 |
+| 启动及重连补审 | `app/onebot/recovery.py`；检查 QQ online/good、NapCat 身份和精确未处理申请；完整当前规则审核、实时事件共用锁及持久化去重 | `test_startup_request_recovery.py`；覆盖并发、重启、QQ 离线恢复、短暂重连、忽略通知去重与 pending；系统消息窗口最多请求 100 条，不保证无限历史 |
 | SQL 配置统一 | v4 保留旧业务表，按旧有效优先级一次导入；原始来源私有备份、版本 CAS、YAML 导入导出和追加式回滚 | `test_v3_config_migration.py`、`test_v3_storage.py`；逐项字段、来源和旧记录核对 |
 | 安全表达式 | Kleene T/F/I、`when`、原始数值、`medal` 数值别名、v2 数组与 goto | `test_v3_expressions.py` 及旧核心回归；未知资料不伪装成失败 |
 | UID/昵称分流 | 标记 UID 清洗、纯数字直查、含字符昵称搜索、无跨路回退、QQ 误填本地阻断 | 输入回归与 `test_v3_bilibili.py`；找不到账号时提示检查，并要求不要填写昵称或 UID 以外的内容 |

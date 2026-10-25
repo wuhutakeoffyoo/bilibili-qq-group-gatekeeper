@@ -515,6 +515,7 @@ class JoinRequestRecordManager:
         condition_states: Optional[dict[str, str]] = None,
         condition_reasons: Optional[dict[str, str]] = None,
         stage_results: Optional[list[str]] = None,
+        request_key: str = "",
     ) -> Optional[JoinRequestAudit]:
         """在一个事务中记录申请、统计信息和可用的身份归属。"""
         audit = cls._new_audit(
@@ -531,8 +532,18 @@ class JoinRequestRecordManager:
             condition_states=condition_states,
             condition_reasons=condition_reasons,
             stage_results=stage_results,
+            request_key=request_key,
         )
-        return cls._persist_new_audit(audit, update_bindings=True)
+        return cls._persist_new_audit(audit, update_bindings=True,
+                                      deduplicate_request=bool(request_key))
+
+    @classmethod
+    def get_request_audit(cls, request_key: str) -> Optional[JoinRequestAudit]:
+        with database_connection() as connection:
+            row = connection.execute(
+                "SELECT * FROM join_request_audits WHERE request_key=? LIMIT 1",
+                (request_key,)).fetchone()
+        return _audit_from_row(row) if row else None
 
     @classmethod
     def begin_pending_decision(cls, **audit_kwargs) -> Optional[JoinRequestAudit]:
