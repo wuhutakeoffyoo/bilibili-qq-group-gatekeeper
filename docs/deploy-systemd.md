@@ -17,6 +17,8 @@ uv run --locked --no-dev python bot.py
 
 示例沿用 `bili-group-gatekeeper.service` 与 `/opt/bili-group-gatekeeper`，实际已有生产路径可能不同，必须读取当前单元核对。
 
+已有多个发布/备份目录时，推荐将其收拢到一个根目录，并用 `current` 作为固定服务入口；当前数据、历史快照和备份必须明确区分。目录布局、路径迁移及 NapCat 登录数据挂载见[生产运维](operations-layout.md)。
+
 1. 创建或确认运行账号，授予应用、数据和日志目录必要权限。
 2. 停止已知的手动实例；核对 PID 与工作目录，不停止其他 Bot。
 3. 复制并编辑服务模板：
