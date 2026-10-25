@@ -91,6 +91,8 @@ SQL 当前修订建立后，修改旧 `groups.yaml`、`review_pipeline.yaml`、`
 
 WebUI、反向 WS 与 H5 共用一个 FastAPI 服务，不再另外启动旧 WebUI HTTP 线程。配置与令牌本地恢复见[管理控制台](docs/admin-console.md)，监听与部署见[部署文档](docs/deploy-systemd.md)。
 
+生产目录统一入口、当前版本辨认、历史归档，以及 NapCat 升级与 QQ 登录数据挂载见[生产运维](docs/operations-layout.md)。
+
 ## 规则示例
 
 ```yaml
