@@ -14,6 +14,12 @@ docker compose --env-file .env.prod -f compose.yaml -f deploy/compose.snowluma.y
 
 启动需要官方框架要求的 `SYS_PTRACE` 和容器 seccomp 配置；参见[官方部署说明](https://github.com/SnowLuma/SnowLuma.Docker.Framework)。遥测默认在覆盖文件中关闭。初次使用的 EULA/隐私确认须由运营者审阅和同意，示例不自动接受。
 
+### 后台运行与登录恢复
+
+官方 Docker 镜像在容器内用 Xvfb 提供虚拟显示环境，原生 Linux QQ 与 SnowLuma 可在没有实体显示器的服务器上后台运行。当前方案仍依赖 QQ 进程及其登录会话；noVNC 只是首次扫码和排障入口，浏览器关闭不影响后台运行。WebUI 的管理登录与 QQ 的扫码登录是两个不同入口。
+
+需要重启后自动恢复时，在 QQ 登录页开启“自动登录”，由运营者使用目标机器人账号扫码并在手机确认。手机当前账号可能与界面预填账号不同，必须以 `get_login_info.user_id` 核验实际登录账号，再确认 `get_status.online/good` 与原有 OneBot 连接。首次在线成功不代表重启恢复已通过；受控重启后再次核验以上项目、bot 补扫完成及历史申请未重复处理，才可记录恢复验收通过。其他缓存账号保持空网络配置，不能直接复制目标账号的网络配置来解决误登录。
+
 ## 已有 NapCat 部署
 
 迁移前记录所有 HTTP/WS 服务端、反向客户端、令牌、格式、原消息回报开关和重连参数，不能只迁移群审核所用的一个端口。SnowLuma 的配置键为 `networks.httpServers`、`httpClients`、`wsServers`、`wsClients`，令牌键为 `accessToken`；NapCat 的 `network.websocketServers` 等 JSON 不能原样覆盖。已禁用的节点不得被迁移成启用。
