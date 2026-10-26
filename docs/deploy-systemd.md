@@ -17,7 +17,7 @@ uv run --locked --no-dev python bot.py
 
 示例沿用 `bili-group-gatekeeper.service` 与 `/opt/bili-group-gatekeeper`，实际已有生产路径可能不同，必须读取当前单元核对。
 
-已有多个发布/备份目录时，推荐将其收拢到一个根目录，并用 `current` 作为固定服务入口；当前数据、历史快照和备份必须明确区分。目录布局、路径迁移及 NapCat 登录数据挂载见[生产运维](operations-layout.md)。
+已有多个发布/备份目录时，推荐将其收拢到一个根目录，并用 `current` 作为固定服务入口；当前数据、历史快照和备份必须明确区分。目录布局、SnowLuma 数据挂载及历史 NapCat 回滚资料见[生产运维](operations-layout.md)。
 
 1. 创建或确认运行账号，授予应用、数据和日志目录必要权限。
 2. 停止已知的手动实例；核对 PID 与工作目录，不停止其他 Bot。
@@ -40,11 +40,13 @@ uv run --locked --no-dev python bot.py
    journalctl -u bili-group-gatekeeper.service -f
    ```
 
-`Restart=on-failure` 只负责退出恢复，不能证明 NapCat 下游处理正常。`/healthz` 也不证明 Cookie、动作回执与业务状态正确。
+`Restart=on-failure` 只负责审核进程的退出恢复，不能证明外部 QQ 适配器处理正常，也不负责 QQ 自动登录。`/healthz` 也不证明 Cookie、动作回执与业务状态正确。
 
 启动后后台每 30 秒检查 QQ 在线及健康状态；首次就绪、OneBot 重连或观察到 QQ 离线后恢复时补扫当前支持的 OneBot 实现中的未处理入群申请。检查 `Startup/reconnect request scan` 日志和审计/实际回执，不能只看容器 `Up` 或 `onebot_connected`。查询失败会重试；需扫码时仍须恢复 QQ 登录。补审会真实执行当前规则允许的审批及通知，上线前须核对群规则。窗口与去重边界见[审核恢复规则](review-requirements.md#启动与重连补审)。
 
 当前接入支持 SnowLuma 和 NapCat 的独立响应契约，推荐 SnowLuma v2.2.0。已有生产切换及新部署覆盖 `deploy/compose.snowluma.yaml` 见[SnowLuma 迁移](snowluma-migration.md)，必须连同其他消费者的 HTTP/WS 节点一起迁移。
+
+[2026-10-26 生产记录](production-acceptance-20261026.md)已确认 SnowLuma 在线、原接入恢复、补扫完成和全量配置数据一致；重启免登录尚未验收，维护重启后仍须人工核对真实 QQ 身份及在线状态。
 
 ## 管理台与反向代理
 
@@ -65,7 +67,15 @@ docker compose --env-file .env.prod -f compose.yaml -f deploy/compose.host.yaml 
 
 需要支持覆盖文件 `!reset` 的 Docker Compose。`--env-file .env.prod` 同时供覆盖文件的变量插值使用；只设置 service `env_file:` 不会为 `${WEBUI_ENABLED}` 插值提供值。输出 `config` 前确保不把展开后的秘密发送到公开日志。
 
-若需同时建立独立 NapCat 容器，可用 [NapCat 覆盖](../deploy/compose.napcat.yaml)：在私有环境设置 `NAPCAT_WEBUI_TOKEN`，然后运行：
+新部署可使用 [SnowLuma 覆盖](../deploy/compose.snowluma.yaml)，由官方镜像提供原生 QQ、Xvfb、WebUI 与 noVNC：
+
+```bash
+docker compose --env-file .env.prod -f compose.yaml -f deploy/compose.snowluma.yaml up -d --build
+```
+
+此模板使用容器网络 `ws://snowluma:3001/`，WebUI 5099 和 noVNC 6081 仅映射主机回环。按[接入文档](snowluma-migration.md)完成协议确认、QQ 登录和令牌配置；需要控制台的 host-network 部署应另按实际可达地址配置 OneBot，不能直接沿用 Compose 私网服务名。
+
+已有 NapCat 接入需要保留时，可选用 [NapCat 覆盖](../deploy/compose.napcat.yaml)，不与 SnowLuma 覆盖同时启动。在私有环境设置 `NAPCAT_WEBUI_TOKEN`，然后运行：
 
 ```bash
 docker compose --env-file .env.prod -f compose.yaml -f deploy/compose.napcat.yaml up -d --build
@@ -73,7 +83,7 @@ docker compose --env-file .env.prod -f compose.yaml -f deploy/compose.napcat.yam
 
 此模板使用容器网络 `ws://napcat:3001`，6099 管理端口仅映射到回环。首次需通过 NapCat WebUI 扫码登录，再把 OneBot WS 服务令牌设为与应用相同；不代表无人值守登录已完成。`NAPCAT_IMAGE` 可选固定发布标签。保留已有生产 NapCat 时不启动这个覆盖文件。来源为 [NapCat-Docker](https://github.com/NapNeko/NapCat-Docker/blob/42e4f9e8373c739f4d2ee599980ab8f87cff39b6/compose/ws.yml)。
 
-挂载至少包括完整 `/app/data` 和 `/app/logs`。已有数据目录需与镜像运行 UID 的权限匹配。容器内 `127.0.0.1` 在桥接模式下不是宿主机 NapCat；正向地址应选实际可达端点。反向模式由 NapCat 连接应用公开的 WS。
+审核应用挂载至少包括完整 `/app/data` 和 `/app/logs`；SnowLuma 的三个持久化挂载由其覆盖文件提供。已有数据目录需与对应镜像运行 UID 的权限匹配。桥接容器内的 `127.0.0.1` 指向容器本身；正向地址应选实际可达的适配器端点，反向模式由适配器连接应用 WS。
 
 没有实际 Docker 守护进程的检查只能证明静态文件结构，不能称为镜像构建/容器运行验收。
 

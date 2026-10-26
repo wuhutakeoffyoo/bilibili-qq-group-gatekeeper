@@ -1,6 +1,6 @@
 # V3 文档目录与功能核对
 
-本目录说明 2026-10-21 核对的 V3 独立实现。生产运行版本、外部接口及真实 QQ 审批状态必须另行验收，不能由文档或单元测试推断。
+本目录说明截至 2026-10-26 核对的 V3 独立实现，QQ 接入使用 SnowLuma 并保留 NapCat 兼容。生产在线核验与未验收项见[本次生产记录](production-acceptance-20261026.md)；真实 QQ 审批状态不能由文档或单元测试推断。
 
 ## 按任务阅读
 
@@ -15,6 +15,9 @@
 | 管理界面、API、登录安全与本地恢复 | [管理控制台](admin-console.md) |
 | 所有权挑战、H5、巡检及退群策略 | [所有权与巡检](ownership-and-patrol.md) |
 | systemd、备份、升级和软件回退 | [部署与升级](deploy-systemd.md) |
+| SnowLuma、后台运行、QQ 登录与 NapCat 迁移 | [SnowLuma 接入](snowluma-migration.md) |
+| 唯一生产入口、适配器目录与回滚副本 | [生产运维](operations-layout.md) |
+| 本次上线的只读实测、配置数据核对及未验收项 | [2026-10-26 生产验收](production-acceptance-20261026.md) |
 | Cookie/磁盘邮件告警 | [邮件告警](cookie-email-alert.md) |
 | 代码覆盖与外部验收限制 | [功能状态](development-roadmap.md) |
 | V3 架构取舍 | [ADR 0003](adr/0003-standalone-runtime-sql-config.md) |
@@ -25,6 +28,7 @@
 | 能力 | 默认代码 |
 | --- | --- |
 | 单一 ASGI 与 OneBot | `app/main.py`、`app/runtime.py`、`app/onebot/` |
+| SnowLuma 契约、跨适配器去重与启动补审 | `app/onebot/snowluma.py`、`inspector.py`、`recovery.py`、`app/service.py` |
 | 规则、表达式、数值与反馈 | `src/gatekeeper/`、`app/service.py` |
 | SQL 配置、来源备份、CAS、v4 | `app/config.py`、`app/legacy_config.py`、`app/database/` |
 | 局部 pending 与精确对账 | `app/gatekeeper/decisions.py`、`reconciler.py` |

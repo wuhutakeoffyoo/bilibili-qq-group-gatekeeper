@@ -1,4 +1,4 @@
-# 生产目录与 NapCat 运维
+# 生产目录与 QQ 适配器运维
 
 ## 一个稳定入口
 
@@ -31,9 +31,37 @@ journalctl -u bili-group-gatekeeper.service -f
 
 此布局的数据跟随发布目录。回退前必须保留上线后最新数据，不能直接把 `current` 指向含陈旧数据库的旧版本。完整切换和回退约束见[部署文档](deploy-systemd.md)。
 
-## 当前适配器与历史 NapCat 运维
+## 当前 SnowLuma 部署
 
-当前推荐使用 SnowLuma，固定版本部署、全部 OneBot 节点和 QQ 数据迁移见[SnowLuma 迁移](snowluma-migration.md)。下述 NapCat v4.18.41 操作是迁移前的历史维护记录；不能因此同时启动旧容器，也不能把其 Node Loader 数据路径直接当作 SnowLuma GUI QQ 的路径。
+当前生产使用 SnowLuma v2.2.0，适配器与审核 bot 是独立运行单元。固定版本部署、全部 OneBot 节点和 QQ 数据迁移见[SnowLuma 迁移](snowluma-migration.md)，实际只读核验与未验收项见[生产记录](production-acceptance-20261026.md)。
+
+| 位置 | 用途 |
+| --- | --- |
+| `/opt/bili-group-gatekeeper/current` | 唯一审核服务入口，指向当前发布 |
+| `/opt/snowluma/docker-compose.yml` | 当前适配器部署定义 |
+| `/opt/snowluma/CURRENT-DEPLOYMENT.md` | 真实镜像摘要、运行参数、端口、备份及验收限制 |
+| `/opt/snowluma/data` | 映射 `/app/data`，保存网关配置与管理认证 |
+| `/opt/snowluma/qq-config` | 映射 `/app/.config`，保存 QQ 配置与登录数据 |
+| `/opt/snowluma/qq-data` | 映射 `/app/.local/share`，保存其他 QQ 数据 |
+| `/opt/napcat` | 迁移前私有配置和登录数据，仅作回滚资料 |
+
+当前容器 `snowluma` 使用 `restart=always`、官方默认 UID/GID 1000 与 QQ 启动参数，只有一个 QQ 主进程。HTTP 3000、WS 2389、WS 3001 及原反向连接保留；审核 WS 3001 使用原 `/onebot/v11/ws` 路径。管理端口 5099/6081 只绑定主机回环，通过临时 SSH 隧道访问。此处是已有生产的配置，新部署 Compose 示例的网络和路径见接入文档。
+
+检查当前实例：
+
+```bash
+docker compose -f /opt/snowluma/docker-compose.yml ps
+docker exec snowluma supervisorctl status
+curl http://127.0.0.1:1128/healthz
+```
+
+还须通过带令牌的 OneBot 连接核对实际 QQ、`get_version_info`、`get_status` 和业务接口。不得把原始配置、展开后的 Compose 或完整启动日志复制到公开反馈中。
+
+QQ 已恢复在线，临时登录隧道已关闭。**重启免登录仍未验收**，当前实例保持运行；维护重启前需安排账号持有人可完成登录。QQ 切换账号期间曾出现客户端自行重启与 supervisor 拉起的重复窗口，登录结束后需确认只保留一个主实例；不能把多个窗口中的任意扫码成功当作目标账号已就绪。
+
+## 历史 NapCat 运维与回滚
+
+下述 NapCat v4.18.41 操作是迁移前的历史维护记录；不能因此同时启动旧容器，也不能把其 Node Loader 数据路径直接当作 SnowLuma GUI QQ 的路径。
 
 NapCat 与审核 bot 是两个独立运行单元。升级前分别记录正在运行的 OneBot `get_version_info`、镜像、容器配置、端口/网络、卷挂载、环境和重启策略，私有保存完整配置及真实 QQ 登录数据。仅使用[官方发行包](https://github.com/NapNeko/NapCatQQ/releases)，校验发行附件的 SHA256；包内通用 `package.json` 版本号不能代替运行版本回执。
 
