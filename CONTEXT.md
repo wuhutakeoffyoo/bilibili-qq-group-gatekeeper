@@ -8,7 +8,8 @@ per-group review pipelines. A supported deployment runs one Bot process.
 - **Join request**: one OneBot group-add event, identified for action deduplication
   by Bot ID, group ID, subtype, and a nonempty request flag.
 - **Missed request recovery**: startup/reconnect discovery of explicitly unchecked
-  NapCat join requests for enabled groups. It runs current admission rules and
+  SnowLuma or NapCat join requests for enabled groups, using each implementation's
+  verified response contract. It runs current admission rules and
   shares durable request deduplication with live events; it does not resolve
   uncertain external action outcomes or infer approval from list absence.
 - **Check result**: evidence obtained from a Bilibili or QQ query. `passed`,
