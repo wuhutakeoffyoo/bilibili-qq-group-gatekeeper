@@ -4,7 +4,7 @@
 
 ```mermaid
 flowchart LR
-    N[NapCat / OneBot v11] <--> W[app/onebot WS 与 echo]
+    N[SnowLuma / NapCat / OneBot v11] <--> W[app/onebot WS 与 echo]
     W --> S[app/service 审核与命令]
     A[管理控制台与 H5] --> F[单个 FastAPI 应用]
     F --> S
@@ -20,7 +20,7 @@ flowchart LR
 | 路径 | 职责 |
 | --- | --- |
 | `app/main.py`、`app/runtime.py` | 统一 ASGI、连接注册、启动、后台任务和关闭 |
-| `app/onebot/` | 正向连接/重连、反向 WS、Action echo、事件队列 |
+| `app/onebot/` | 正向连接/重连、反向 WS、Action echo、事件队列、按实现身份选择的请求核验与启动补审 |
 | `app/service.py`、`app/commands.py` | 事件编排、权限、模拟、清晰反馈与通知 |
 | `src/gatekeeper/` | 数据模型、解析、T/F/I、AST、管道和纯格式化 |
 | `app/config.py`、`app/legacy_config.py` | SQL 配置版本与首次旧来源编译 |
@@ -33,6 +33,12 @@ flowchart LR
 | `src/plugins/` | 归档旧实现和回归材料，不能处理 v4 数据 |
 
 WS 接收循环与事件处理分开，审核等待动作回包时接收循环仍能处理 echo。明确 retcode 失败与超时/断线分别建模，未知不能自动当失败重试。
+
+## QQ 适配器与恢复边界
+
+当前生产使用 SnowLuma，NapCat 保留为兼容接入和回滚选项。`inspector.py` 根据 `get_version_info` 选择已核对的契约：SnowLuma 使用系统消息数组、`requester_uin` 与完整 `slreq` 标识；NapCat 使用 `join_requests`、`invitor_uin` 与数字标识。两者共享业务服务、SQL 审计和精确申请去重，迁移不重写历史审批结果。未知实现或证据不足继续交人工核验。
+
+`recovery.py` 在健康连接、重连或已观察到的 QQ 离线恢复后扫描明确未处理的申请。它负责补审，QQ 登录及其恢复由外部客户端负责。SnowLuma 官方容器内的 QQ 运行于 Xvfb；noVNC 是登录和排障入口。当前[生产记录](production-acceptance-20261026.md)已确认在线和补扫，重启免登录仍未验收。协议细节与窗口限制见[SnowLuma 接入](snowluma-migration.md)。
 
 ## 一致性与进程边界
 

@@ -3,9 +3,9 @@
 [![CI](https://github.com/wuhutakeoffyoo/bilibili-qq-group-gatekeeper/actions/workflows/ci.yml/badge.svg)](https://github.com/wuhutakeoffyoo/bilibili-qq-group-gatekeeper/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
-通过 B站账号资料审核 QQ 入群申请的独立服务。**V3 默认使用 FastAPI + 独立 OneBot v11 WebSocket，直接连接 NapCat；默认运行不依赖 NoneBot2。** 审核规则、凭证和配置历史统一保存在 SQLite v4。
+通过 B站账号资料审核 QQ 入群申请的独立服务。**V3 默认使用 FastAPI + 独立 OneBot v11 WebSocket，支持 SnowLuma 与 NapCat；当前项目生产接入使用 SnowLuma，默认运行不依赖 NoneBot2。** 审核规则、凭证和配置历史统一保存在 SQLite v4。
 
-本页说明仓库实现，不代表某个生产实例已经升级或通过真实审批验收。升级前请备份完整 `data/`、实际环境文件和服务配置，见[部署与迁移](docs/deploy-systemd.md)。
+本页说明仓库实现。指定实例的在线核验、数据迁移及未验收项见 [2026-10-26 生产验收记录](docs/production-acceptance-20261026.md)。升级前请备份完整 `data/`、实际环境文件和服务配置，见[部署与迁移](docs/deploy-systemd.md)。
 
 [文档目录](docs/README.md) · [架构](docs/architecture.md) · [配置与迁移](docs/configuration.md) · [审核规则](docs/review-requirements.md) · [拒绝反馈](docs/rejection-feedback.md) · [更新日志](CHANGELOG.md)
 
@@ -45,7 +45,7 @@ src/plugins/                       归档旧实现与回归材料，不用于 v4
 
 ## 安装与启动
 
-需要受支持的 Python（以 `pyproject.toml` 为准）和 `uv`。先安装并配置 NapCat 的 OneBot v11。
+需要受支持的 Python（以 `pyproject.toml` 为准）和 `uv`。先按 [SnowLuma 接入说明](docs/snowluma-migration.md)安装并配置 OneBot v11；已有 NapCat 部署可继续使用其兼容接入。
 
 ```bash
 git clone https://github.com/wuhutakeoffyoo/bilibili-qq-group-gatekeeper.git
@@ -62,7 +62,7 @@ Windows 使用 `Copy-Item .env.example .env` 和 `Copy-Item .env.prod.example .e
 
 ```dotenv
 SUPERUSERS=["123456789"]
-ONEBOT_WS_URLS=["ws://127.0.0.1:3001/onebot/v11/ws"]
+ONEBOT_WS_URLS=["ws://127.0.0.1:3001/"]
 ONEBOT_ACCESS_TOKEN=replace-with-your-private-token
 HOST=127.0.0.1
 PORT=1128
@@ -70,7 +70,7 @@ WEBUI_ENABLED=true
 WEBUI_TOKEN=replace-with-a-long-random-private-token
 ```
 
-`ONEBOT_WS_URLS` 填实际 NapCat 正向 WS 地址。使用反向 WS 时可置空列表，将 NapCat 地址设为 `ws://应用地址:1128/onebot/v11/ws`，配相同令牌并携带账号 ID。外网访问需自行配置 HTTPS/WSS 反向代理及访问限制。
+`ONEBOT_WS_URLS` 填实际适配器的正向 WS 地址；SnowLuma 示例使用 `/`，保留自定义路径时须与其服务端 `path` 一致。使用反向 WS 时可置空列表，将 SnowLuma 或 NapCat 的客户端地址设为 `ws://应用地址:1128/onebot/v11/ws`，配相同令牌并携带账号 ID。外网访问需自行配置 HTTPS/WSS 反向代理及访问限制。
 
 启动默认独立服务：
 
@@ -91,9 +91,11 @@ SQL 当前修订建立后，修改旧 `groups.yaml`、`review_pipeline.yaml`、`
 
 WebUI、反向 WS 与 H5 共用一个 FastAPI 服务，不再另外启动旧 WebUI HTTP 线程。配置与令牌本地恢复见[管理控制台](docs/admin-console.md)，监听与部署见[部署文档](docs/deploy-systemd.md)。
 
-生产目录统一入口、当前版本辨认、历史归档，以及 NapCat 升级与 QQ 登录数据挂载见[生产运维](docs/operations-layout.md)。
+生产目录统一入口、当前版本辨认、SnowLuma 运维、QQ 登录数据挂载及历史 NapCat 回滚副本见[生产运维](docs/operations-layout.md)。
 
 QQ 接入推荐 SnowLuma；已有 NapCat 的配置、登录数据、群申请标识差异及切换验收见[SnowLuma 迁移](docs/snowluma-migration.md)。
+
+SnowLuma 官方 Docker 在 Xvfb 虚拟显示环境中后台运行原生 QQ，noVNC 仅用于登录和排障，关闭浏览器不影响 bot。当前生产只读烟测与全量数据核对已通过；**重启后免登录仍未验收**，不能仅凭勾选“自动登录”或配置持久化卷判定恢复完成。
 
 ## 规则示例
 

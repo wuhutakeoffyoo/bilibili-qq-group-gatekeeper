@@ -1,6 +1,6 @@
 # V3 审核规则
 
-默认审核由独立 `app/service.py` 编排，使用 `src/gatekeeper/` 的纯 Python 核心。本文描述实现合同；真实账号、NapCat 能力和生产回执仍需部署验收。
+默认审核由独立 `app/service.py` 编排，使用 `src/gatekeeper/` 的纯 Python 核心。本文描述实现合同；真实账号、SnowLuma/NapCat 能力和生产回执仍需部署验收。
 
 ## T/F/I 与分支
 

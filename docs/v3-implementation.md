@@ -1,13 +1,13 @@
 # V3 架构实施与验收
 
-核对日期：2026-10-21。默认入口、配置存储、协议层、审核和管理台均已迁入独立应用；当前实现对应下表。生产发布的提交、迁移结果和烟测应另附发布记录。
+核对日期：2026-10-26。默认入口、配置存储、协议层、审核和管理台均已迁入独立应用；当前实现对应下表。生产发布的提交、迁移结果和只读烟测见[本次生产验收记录](production-acceptance-20261026.md)，重启免登录及真实新申请审批仍未验收。
 
 ## 原始蓝图对应
 
 | 能力 | 当前实现 | 已有验证 |
 | --- | --- | --- |
 | 独立通信与统一 ASGI | `app/main.py`、`app/runtime.py`、`app/onebot/`；正反向 WS、echo、重连、事件队列和生命周期 | `test_v3_onebot.py`、`test_v3_runtime.py`；默认依赖的干净环境中无 NoneBot，工厂可创建 |
-| 启动及重连补审 | `app/onebot/recovery.py`；检查 QQ online/good、NapCat 身份和精确未处理申请；完整当前规则审核、实时事件共用锁及持久化去重 | `test_startup_request_recovery.py`；覆盖并发、重启、QQ 离线恢复、短暂重连、忽略通知去重与 pending；系统消息窗口最多请求 100 条，不保证无限历史 |
+| 启动及重连补审 | `app/onebot/recovery.py`；检查 QQ online/good、SnowLuma/NapCat 身份和精确未处理申请；完整当前规则审核、实时事件共用锁及持久化去重 | `test_startup_request_recovery.py`、`test_snowluma.py`；覆盖并发、重启、QQ 离线恢复、短暂重连、忽略通知去重与 pending；NapCat 最多请求 100 条，SnowLuma 每个收件箱最多 100 条，不保证无限历史 |
 | SnowLuma 接入 | `app/onebot/snowluma.py`、`inspector.py`；v2.2.0 数组、申请 QQ、规范 flag、跨适配器去重及精确 pending 证据；提供 Compose 和迁移文档 | `test_snowluma.py`；真实 SQLite 覆盖历史键、收件箱变体、并发、QQ 冲突、邀请隔离、未知回执及错误接口契约 |
 | SQL 配置统一 | v4 保留旧业务表，按旧有效优先级一次导入；原始来源私有备份、版本 CAS、YAML 导入导出和追加式回滚 | `test_v3_config_migration.py`、`test_v3_storage.py`；逐项字段、来源和旧记录核对 |
 | 安全表达式 | Kleene T/F/I、`when`、原始数值、`medal` 数值别名、v2 数组与 goto | `test_v3_expressions.py` 及旧核心回归；未知资料不伪装成失败 |
@@ -19,7 +19,7 @@
 | 所有权与 H5 | 可选 DM/动态暗号；申请者原生扫码与管理员凭证隔离；挑战、有效期、单次消费及原申请受控恢复 | `test_v3_ownership_patrol.py`、`test_v3_bilibili.py`；真实 SQLite + H5 HTTP → 原申请重新审核；不接收任意 Token |
 | 成员生命周期 | 显式独立巡检表达式、时区 Cron、低速报告/提醒/移除、宽限期、动作前重查、退群释放保护 | Cron、角色、Unknown、策略变化、动作幂等、跨群完整性回归 |
 | 管理控制台 | 群表单/管道/拒绝文案、审计详情、绑定/退群清理、pending 确认、凭证健康、配置历史及导入导出 | `test_v3_admin.py`；真实 SQL、会话/CSRF/CSP、代理边界、CAS；浏览器操作和窄屏核对 |
-| 发布与运维 | uv 默认独立依赖、systemd、Docker/Compose、NapCat 配套示例、日志与邮件、只读迁移比较工具 | 编译、Ruff、完整回归；容器构建及生产迁移以对应发布记录为准 |
+| 发布与运维 | uv 默认独立依赖、systemd、Docker/Compose、SnowLuma 与 NapCat 配套示例、日志与邮件、只读迁移比较工具 | 编译、Ruff、完整回归；实际 SnowLuma 在线与全量迁移见生产记录，无人值守登录未验收 |
 
 CI 针对 Python 3.10/3.13 分别执行默认独立集成和含可选兼容入口的完整回归。精确命令见[贡献指南](../CONTRIBUTING.md)，不能用历史测试数量替代当前提交的 CI。
 
@@ -39,11 +39,12 @@ CI 针对 Python 3.10/3.13 分别执行默认独立集成和含可选兼容入�
 
 ## 协议参考与验证层次
 
-以下是核对过的协议实现参考，不是 B站对接口稳定性的承诺：
+以下为已核对的协议实现参考，生产可用性仍须按对应版本及账号验证：
 
+- [SnowLuma v2.2.0](https://github.com/SnowLuma/SnowLuma/tree/v2.2.0)：系统消息数组、完整 `slreq`、申请人及收件箱契约；本项目兼容和去重行为由 `test_snowluma.py` 验证，实际在线核验见生产记录。
 - [NapCat 系统消息实现](https://github.com/NapNeko/NapCatQQ/blob/450fb0429a064e3418e0c698b1b4d78324101929/packages/napcat-onebot/action/system/GetSystemMsg.ts)：精确识别 `join_requests` 中未处理申请，不能推断已处理结果。
 - [B站登录与刷新协议参考](https://github.com/Ailitonia/omega-miya/blob/aa8b749378b6f599461c73cd2e4ff7b2a3ed676c/src/utils/bilibili_api/api/login.py)：二维码、correspond、refresh 与 confirm 的先后顺序。
 - [私信协议参考](https://github.com/bromothymolb/bilibili-api-zoku/blob/a0a1566c7c462ab57a3891c3a5f12976cbd11e9e/bilibili_api/session.py)及[评论接口定义](https://github.com/bromothymolb/bilibili-api-zoku/blob/a0a1566c7c462ab57a3891c3a5f12976cbd11e9e/bilibili_api/data/api/common.json)：核对实际发送者、收信方、时间和随机码；没有发现证据不能产生通过结论。
 - [NapCat Docker 编排参考](https://github.com/NapNeko/NapCat-Docker/blob/42e4f9e8373c739f4d2ee599980ab8f87cff39b6/compose/ws.yml)：首次登录、管理端口和 Token 仍需配置。
 
-本地 fixture/浏览器检查证明代码行为；生产只读烟测证明当前连接、资料查询和规则运行。真实审批、原生扫码确认、凭证刷新、私信/动态读取和自动移除必须有对应账号/申请的受控回执。发布记录应明确分别完成了哪一层。
+本地 fixture/浏览器检查核对代码行为；生产只读烟测核对当前连接、资料查询和系统消息读取。真实审批及其规则分支、原生扫码确认、凭证刷新、私信/动态读取和自动移除必须有对应账号/申请的受控回执。发布记录应明确分别完成了哪一层。
