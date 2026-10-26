@@ -18,6 +18,7 @@ from app.database.leaves import LeaveRecordManager
 from app.database.records import JoinRequestRecordManager
 from app.gatekeeper.decisions import ScopedDecisionService
 from app.onebot.events import OneBotEvent
+from app.onebot.snowluma import add_request_identity, request_identity_keys
 from app.settings import get_settings
 from src.gatekeeper.conditions import (
     LEGACY_NICKNAME_NOT_FOUND_MESSAGE, build_condition_snapshot,
@@ -357,11 +358,19 @@ class GatekeeperService:
         if not request.request_key:
             logger.warning("Ignoring group request without an exact request identity")
             return
+        if request.flag.startswith("slreq:") and add_request_identity(request.flag, request.group_id) is None:
+            logger.warning("SnowLuma join flag does not match its event group/type; leaving request untouched")
+            return
         # Separate outer locks avoid nesting the decision service's identity locks.
         # Live events and startup catch-up share this entire evaluation boundary.
-        async with self.request_locks.hold(request.request_key):
-            if await run_storage(JoinRequestRecordManager.get_request_audit, request.request_key):
-                return
+        request_keys = request_identity_keys(request)
+        async with self.request_locks.hold(request_keys[-1]):
+            for key in request_keys:
+                audit = await run_storage(JoinRequestRecordManager.get_request_audit, key)
+                if audit is not None:
+                    if audit.qq != str(event.user_id):
+                        logger.warning("Request identity conflicts with its durable applicant; leaving request untouched")
+                    return
             await self._handle_group_request(bot, event)
 
     async def _handle_group_request(self, bot, event):

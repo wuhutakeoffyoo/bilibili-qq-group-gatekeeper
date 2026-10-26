@@ -1,0 +1,37 @@
+# Optional official SnowLuma companion; do not combine with the NapCat overlay.
+# docker compose --env-file .env.prod -f compose.yaml -f deploy/compose.snowluma.yaml up -d --build
+services:
+  gatekeeper:
+    depends_on:
+      - snowluma
+    environment:
+      ONEBOT_WS_URLS: '["ws://snowluma:3001/"]'
+  snowluma:
+    image: ${SNOWLUMA_IMAGE:-motricseven7/snowluma:v2.2.0}
+    restart: unless-stopped
+    shm_size: 1gb
+    cap_add:
+      - SYS_PTRACE
+    security_opt:
+      - seccomp:unconfined
+    ulimits:
+      nofile:
+        soft: 65536
+        hard: 1048576
+    environment:
+      SNOWLUMA_WEBUI_HOST: 0.0.0.0
+      SNOWLUMA_WEBUI_PORT: "5099"
+      SNOWLUMA_ONEBOT_HOST: 0.0.0.0
+      SNOWLUMA_HOOK_AUTOLOAD: "1"
+      SNOWLUMA_TELEMETRY: "0"
+      TZ: Asia/Shanghai
+    ports:
+      - "127.0.0.1:5099:5099"
+      - "127.0.0.1:6081:6081"
+    volumes:
+      - ./data/snowluma/gateway:/app/data
+      - ./data/snowluma/qq-config:/app/.config
+      - ./data/snowluma/qq-share:/app/.local/share
+# Use the local WebUI/noVNC onboarding to accept the owner-reviewed agreements
+# and log in. Configure the WS server's accessToken to ONEBOT_ACCESS_TOKEN.
+# GUI QQ data paths differ from NapCat's Node Loader; never share a live profile.

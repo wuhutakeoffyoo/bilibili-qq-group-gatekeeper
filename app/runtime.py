@@ -12,7 +12,7 @@ from app.database.async_storage import run_storage
 from app.database.legacy import initialize_database
 from app.onebot.client import OneBotClient
 from app.onebot.events import OneBotEvent
-from app.onebot.napcat import NapCatRequestInspector
+from app.onebot.inspector import OneBotRequestInspector
 from app.onebot.recovery import MissedRequestRecovery
 from app.settings import get_settings
 
@@ -34,7 +34,7 @@ class Runtime:
         self.ownership = ownership
         self.patrol = patrol
         self.credentials = credentials
-        self.request_inspector = NapCatRequestInspector(self.get_client)
+        self.request_inspector = OneBotRequestInspector(self.get_client)
         self.reconciler = None
         self.request_recovery = MissedRequestRecovery(self)
         self.background_enabled = background_enabled
