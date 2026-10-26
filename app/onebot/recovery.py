@@ -1,4 +1,4 @@
-"""Catch up missed NapCat group-add events after startup or reconnection."""
+"""Catch up missed OneBot group-add events after startup or reconnection."""
 from __future__ import annotations
 
 import asyncio
@@ -6,6 +6,7 @@ import logging
 from collections import Counter
 
 from app.onebot.napcat import MAX_SAFE_INTEGER, _decimal
+from app.onebot.snowluma import unhandled_events as snowluma_unhandled_events
 
 logger = logging.getLogger(__name__)
 REQUEST_LIMIT = 100
@@ -65,8 +66,9 @@ class MissedRequestRecovery:
                     if self._checked.get(client) == generation:
                         continue
                     version = await client.call_action("get_version_info")
-                    if not isinstance(version, dict) or "napcat" not in str(version.get("app_name", "")).casefold():
-                        logger.warning("Startup request scan requires NapCat get_group_system_msg support")
+                    name = str(version.get("app_name", "")).casefold() if isinstance(version, dict) else ""
+                    if name != "snowluma" and "napcat" not in name:
+                        logger.warning("Startup request scan requires a verified SnowLuma or NapCat implementation")
                         self._checked[client] = generation
                         continue
                     login = await client.call_action("get_login_info")
@@ -75,11 +77,15 @@ class MissedRequestRecovery:
                         raise ValueError("OneBot login identity does not match this connection")
                     client.self_id = bot_id
                     payload = await client.call_action("get_group_system_msg", count=REQUEST_LIMIT)
-                    events = unhandled_events(payload, bot_id)
-                    total = sum(len(payload.get(key, [])) for key in ("join_requests", "invited_requests")
-                                if isinstance(payload.get(key), list))
+                    if name == "snowluma":
+                        events = snowluma_unhandled_events(payload, bot_id)
+                        total = len(payload)
+                    else:
+                        events = unhandled_events(payload, bot_id)
+                        total = sum(len(payload.get(key, [])) for key in ("join_requests", "invited_requests")
+                                    if isinstance(payload.get(key), list))
                     if total >= REQUEST_LIMIT:
-                        logger.warning("NapCat system-message window reached %s; older requests may require manual review", REQUEST_LIMIT)
+                        logger.warning("OneBot system-message window reached %s; older requests may require manual review", REQUEST_LIMIT)
                     processed = 0
                     failed = False
                     for event in events:

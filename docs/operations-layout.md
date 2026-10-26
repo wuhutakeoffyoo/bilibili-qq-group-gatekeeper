@@ -31,7 +31,9 @@ journalctl -u bili-group-gatekeeper.service -f
 
 此布局的数据跟随发布目录。回退前必须保留上线后最新数据，不能直接把 `current` 指向含陈旧数据库的旧版本。完整切换和回退约束见[部署文档](deploy-systemd.md)。
 
-## NapCat 升级与登录数据
+## 当前适配器与历史 NapCat 运维
+
+当前推荐使用 SnowLuma，固定版本部署、全部 OneBot 节点和 QQ 数据迁移见[SnowLuma 迁移](snowluma-migration.md)。下述 NapCat v4.18.41 操作是迁移前的历史维护记录；不能因此同时启动旧容器，也不能把其 Node Loader 数据路径直接当作 SnowLuma GUI QQ 的路径。
 
 NapCat 与审核 bot 是两个独立运行单元。升级前分别记录正在运行的 OneBot `get_version_info`、镜像、容器配置、端口/网络、卷挂载、环境和重启策略，私有保存完整配置及真实 QQ 登录数据。仅使用[官方发行包](https://github.com/NapNeko/NapCatQQ/releases)，校验发行附件的 SHA256；包内通用 `package.json` 版本号不能代替运行版本回执。
 
