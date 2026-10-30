@@ -2,11 +2,11 @@
 
 独立运行时通过 OneBot v11 接入 SnowLuma，业务 SQLite、B站接口和审核流程继续由本项目管理。本文基于 [SnowLuma v2.2.0](https://github.com/SnowLuma/SnowLuma/tree/v2.2.0) 的动作及申请转换源码；协议夹具与真实生产验收分别记录，不能把兼容 OneBot 等同于所有扩展接口结构相同。
 
-当前生产已迁入 SnowLuma，全部原有接入、只读接口、补审扫描与配置数据核验见 [2026-10-26 生产记录](production-acceptance-20261026.md)。**重启免登录尚未验收**；当前实例保持运行。
+当前生产已迁入 SnowLuma，接入与配置数据基线见 [2026-10-26 生产记录](production-acceptance-20261026.md)。10 月 30 日确认原版申请转换缺陷并以私有产物修复，已恢复真实遗漏申请审核，见[后续核查](snowluma-request-incident-20261030.md)。**重启免登录尚未验收**；当前实例保持运行。
 
 ## 新部署
 
-官方 Docker 框架提供 QQ、SnowLuma、WebUI 和 noVNC。可使用：
+官方 Docker 框架提供 QQ、SnowLuma、WebUI 和 noVNC。v2.2.0 原版存在申请转换缺陷；先按[私有修复说明](snowluma-request-incident-20261030.md)构建本机镜像，再将 `SNOWLUMA_IMAGE` 指向已修复产物。示例固定官方版本用于可复现基线，不能直接当作已修复部署。启动示例：
 
 ```bash
 docker compose --env-file .env.prod -f compose.yaml -f deploy/compose.snowluma.yaml up -d --build
@@ -47,6 +47,6 @@ SnowLuma 查询合并主收件箱与过滤收件箱，每个最多请求 100 条
 
 ## 验收与回退
 
-分别确认真实版本、`online/good`、当前登录 QQ、资料查询、群列表、系统申请数组及原有其他消费者的连接。然后验证 bot 启动/重连补审、原申请去重和现有配置不漂移。真实审批、私聊、扫码确认和踢人须单独记录实际回执，不能以只读探针代替。
+分别确认真实版本、`online/good`、当前登录 QQ、资料查询、群列表、系统申请数组及原有其他消费者的连接。然后验证 bot 启动/重连及健康运行期间的周期补审、原申请去重和现有配置不漂移。真实审批、私聊、扫码确认和踢人须单独记录实际回执，不能以只读探针代替。
 
 若新适配器不能就绪，先停新实例，保留新产生的数据，再恢复原 OneBot 环境和旧容器；不得用过期 SQLite 覆盖上线后的新业务记录。适配器切换不能更改 B站身份路由、资格条件或隐私 Unknown 的处理规则。

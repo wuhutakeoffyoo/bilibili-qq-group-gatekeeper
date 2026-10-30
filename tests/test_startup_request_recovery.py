@@ -161,6 +161,66 @@ class RecoveryTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.client.calls.count("get_group_system_msg"), 2)
         self.assertEqual([action["flag"] for action in self.client.actions], ["1", "2"])
 
+    async def test_periodic_scan_catches_missed_push_on_healthy_connection(self):
+        now = [0.0]
+        self.recovery = MissedRequestRecovery(self.runtime, clock=lambda: now[0])
+        await self.recovery.run_once()
+        self.client.rows.append(row(2, qq=201))
+        now[0] = 59
+        await self.recovery.run_once()
+        self.assertEqual(self.client.calls.count("get_group_system_msg"), 1)
+        now[0] = 60
+        await self.recovery.run_once()
+        self.assertEqual([action["flag"] for action in self.client.actions], ["1", "2"])
+        self.assertEqual(Records.get_user_report("200", 5)[1].approved_count, 1)
+
+    async def test_failed_periodic_review_retries_before_next_interval(self):
+        now = [0.0]
+        self.recovery = MissedRequestRecovery(self.runtime, clock=lambda: now[0])
+        await self.recovery.run_once()
+        self.client.rows.append(row(2, qq=201))
+        now[0] = 60
+        with patch.object(self.service, "handle_group_request", side_effect=RuntimeError("storage unavailable")):
+            await self.recovery.run_once()
+        now[0] = 61
+        await self.recovery.run_once()
+        self.assertEqual([action["flag"] for action in self.client.actions], ["1", "2"])
+
+    async def test_failed_periodic_list_retries_before_next_interval(self):
+        now = [0.0]
+        self.recovery = MissedRequestRecovery(self.runtime, clock=lambda: now[0])
+        await self.recovery.run_once()
+        now[0] = 60
+        self.client.fail_list = True
+        await self.recovery.run_once()
+        self.client.fail_list = False
+        self.client.rows.append(row(2, qq=201))
+        now[0] = 61
+        await self.recovery.run_once()
+        self.assertEqual([action["flag"] for action in self.client.actions], ["1", "2"])
+
+    async def test_unknown_implementation_is_not_polled_until_reconnect(self):
+        now = [0.0]
+        self.recovery = MissedRequestRecovery(self.runtime, clock=lambda: now[0])
+        original = self.client.call_action
+
+        async def unknown_version(action, **kwargs):
+            if action == "get_version_info":
+                self.client.calls.append(action)
+                return {"app_name": "unknown"}
+            return await original(action, **kwargs)
+
+        self.client.call_action = unknown_version
+        await self.recovery.run_once()
+        now[0] = 120
+        await self.recovery.run_once()
+        self.assertEqual(self.client.calls.count("get_version_info"), 1)
+        self.assertNotIn("get_group_system_msg", self.client.calls)
+        self.client.call_action = original
+        self.client.connection_generation += 1
+        await self.recovery.run_once()
+        self.assertEqual(len(self.client.actions), 1)
+
     async def test_real_onebot_echo_session_drives_startup_and_reconnect_scan(self):
         source = self.client
 

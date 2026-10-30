@@ -1,13 +1,13 @@
 # V3 架构实施与验收
 
-核对日期：2026-10-26。默认入口、配置存储、协议层、审核和管理台均已迁入独立应用；当前实现对应下表。生产发布的提交、迁移结果和只读烟测见[本次生产验收记录](production-acceptance-20261026.md)，重启免登录及真实新申请审批仍未验收。
+核对日期：2026-10-30。默认入口、配置存储、协议层、审核和管理台均已迁入独立应用；当前实现对应下表。生产基线见[迁移记录](production-acceptance-20261026.md)，申请转换修复与真实忽略审核见[后续核查](snowluma-request-incident-20261030.md)；重启免登录及 SnowLuma 同意/拒绝真实新申请仍未验收。
 
 ## 原始蓝图对应
 
 | 能力 | 当前实现 | 已有验证 |
 | --- | --- | --- |
 | 独立通信与统一 ASGI | `app/main.py`、`app/runtime.py`、`app/onebot/`；正反向 WS、echo、重连、事件队列和生命周期 | `test_v3_onebot.py`、`test_v3_runtime.py`；默认依赖的干净环境中无 NoneBot，工厂可创建 |
-| 启动及重连补审 | `app/onebot/recovery.py`；检查 QQ online/good、SnowLuma/NapCat 身份和精确未处理申请；完整当前规则审核、实时事件共用锁及持久化去重 | `test_startup_request_recovery.py`、`test_snowluma.py`；覆盖并发、重启、QQ 离线恢复、短暂重连、忽略通知去重与 pending；NapCat 最多请求 100 条，SnowLuma 每个收件箱最多 100 条，不保证无限历史 |
+| 启动、重连及周期补审 | `app/onebot/recovery.py`；每 30 秒检查 QQ online/good，健康期间距上次成功至少 60 秒补扫；核对实现身份和精确申请，完整当前规则审核、实时事件共用锁及持久化去重 | `test_startup_request_recovery.py`、`test_snowluma.py`；覆盖健康连接漏推送、周期失败重试、并发、重启、QQ 离线恢复、忽略通知去重与 pending；NapCat 最多请求 100 条，SnowLuma 每个收件箱最多 100 条，不保证无限历史 |
 | SnowLuma 接入 | `app/onebot/snowluma.py`、`inspector.py`；v2.2.0 数组、申请 QQ、规范 flag、跨适配器去重及精确 pending 证据；提供 Compose 和迁移文档 | `test_snowluma.py`；真实 SQLite 覆盖历史键、收件箱变体、并发、QQ 冲突、邀请隔离、未知回执及错误接口契约 |
 | SQL 配置统一 | v4 保留旧业务表，按旧有效优先级一次导入；原始来源私有备份、版本 CAS、YAML 导入导出和追加式回滚 | `test_v3_config_migration.py`、`test_v3_storage.py`；逐项字段、来源和旧记录核对 |
 | 安全表达式 | Kleene T/F/I、`when`、原始数值、`medal` 数值别名、v2 数组与 goto | `test_v3_expressions.py` 及旧核心回归；未知资料不伪装成失败 |

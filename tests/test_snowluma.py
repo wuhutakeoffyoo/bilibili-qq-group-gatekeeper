@@ -56,6 +56,23 @@ class SnowLumaTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.answers, [])
         self.assertEqual(self.client.actions, [])
 
+    async def test_periodic_scan_preserves_ignored_audit_and_discovers_new_request(self):
+        now = [0.0]
+        self.recovery = MissedRequestRecovery(self.runtime, clock=lambda: now[0])
+        self.state = "inaccessible"
+        await self.recovery.run_once()
+        messages = list(self.client.messages)
+        self.client.rows = [row(filtered=1), row(2, qq=201), row(3, kind=2, qq=202),
+                            row(4, kind=22, qq=203), row(5, qq=0)]
+        self.state = "passed"
+        now[0] = 60
+        await self.recovery.run_once()
+        self.assertEqual(self.client.messages, messages)
+        self.assertEqual(self.client.actions, [{"flag": "slreq:1:2:10:1:0", "sub_type": "add", "approve": True}])
+        self.assertEqual(Records.get_user_report("200", 5)[1].ignored_count, 1)
+        self.assertEqual(Records.get_user_report("201", 5)[1].approved_count, 1)
+        self.assertEqual(self.answers, ["UID:456", "UID:456"])
+
     async def test_two_inbox_flags_and_restart_share_one_application(self):
         await self.recovery.run_once()
         self.client.rows = [row(filtered=1)]

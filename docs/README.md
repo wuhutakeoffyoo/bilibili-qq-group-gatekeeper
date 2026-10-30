@@ -1,6 +1,6 @@
 # V3 文档目录与功能核对
 
-本目录说明截至 2026-10-26 核对的 V3 独立实现，QQ 接入使用 SnowLuma 并保留 NapCat 兼容。生产在线核验与未验收项见[本次生产记录](production-acceptance-20261026.md)；真实 QQ 审批状态不能由文档或单元测试推断。
+本目录说明截至 2026-10-30 核对的 V3 独立实现，QQ 接入使用 SnowLuma 并保留 NapCat 兼容。生产基线见[迁移记录](production-acceptance-20261026.md)，后续修复与边界见[申请漏收核查](snowluma-request-incident-20261030.md)；真实 QQ 审批状态不能由文档或单元测试推断。
 
 ## 按任务阅读
 
@@ -18,6 +18,7 @@
 | SnowLuma、后台运行、QQ 登录与 NapCat 迁移 | [SnowLuma 接入](snowluma-migration.md) |
 | 唯一生产入口、适配器目录与回滚副本 | [生产运维](operations-layout.md) |
 | 本次上线的只读实测、配置数据核对及未验收项 | [2026-10-26 生产验收](production-acceptance-20261026.md) |
+| SnowLuma 申请类型缺陷、私有修复与真实补审 | [2026-10-30 漏收核查](snowluma-request-incident-20261030.md) |
 | Cookie/磁盘邮件告警 | [邮件告警](cookie-email-alert.md) |
 | 代码覆盖与外部验收限制 | [功能状态](development-roadmap.md) |
 | V3 架构取舍 | [ADR 0003](adr/0003-standalone-runtime-sql-config.md) |
