@@ -42,11 +42,11 @@ uv run --locked --no-dev python bot.py
 
 `Restart=on-failure` 只负责审核进程的退出恢复，不能证明外部 QQ 适配器处理正常，也不负责 QQ 自动登录。`/healthz` 也不证明 Cookie、动作回执与业务状态正确。
 
-启动后后台每 30 秒检查 QQ 在线及健康状态；首次就绪、OneBot 重连或观察到 QQ 离线后恢复时补扫当前支持的 OneBot 实现中的未处理入群申请。检查 `Startup/reconnect request scan` 日志和审计/实际回执，不能只看容器 `Up` 或 `onebot_connected`。查询失败会重试；需扫码时仍须恢复 QQ 登录。补审会真实执行当前规则允许的审批及通知，上线前须核对群规则。窗口与去重边界见[审核恢复规则](review-requirements.md#启动与重连补审)。
+启动后后台每 30 秒检查 QQ 在线及健康状态；首次就绪、OneBot 重连或观察到 QQ 离线后恢复时补扫未处理入群申请，持续健康时也在上次成功扫描至少 60 秒后补扫。检查 `Startup/reconnect request scan` 日志和审计/实际回执，不能只看容器 `Up` 或 `onebot_connected`。查询或审核失败下个检查周期重试；需扫码时仍须恢复 QQ 登录。补审会真实执行当前规则允许的审批及通知，上线前须核对群规则。窗口与去重边界见[审核恢复规则](review-requirements.md#启动与重连补审)。
 
-当前接入支持 SnowLuma 和 NapCat 的独立响应契约，推荐 SnowLuma v2.2.0。已有生产切换及新部署覆盖 `deploy/compose.snowluma.yaml` 见[SnowLuma 迁移](snowluma-migration.md)，必须连同其他消费者的 HTTP/WS 节点一起迁移。
+当前接入支持 SnowLuma 和 NapCat 的独立响应契约；生产使用基于 SnowLuma v2.2.0 的私有申请转换修复，不能直接沿用未修复原版。已有生产切换及新部署覆盖 `deploy/compose.snowluma.yaml` 见[SnowLuma 迁移](snowluma-migration.md)，必须连同其他消费者的 HTTP/WS 节点一起迁移。
 
-[2026-10-26 生产记录](production-acceptance-20261026.md)已确认 SnowLuma 在线、原接入恢复、补扫完成和全量配置数据一致；重启免登录尚未验收，维护重启后仍须人工核对真实 QQ 身份及在线状态。
+[2026-10-26 生产记录](production-acceptance-20261026.md)记录接入与配置数据基线；[2026-10-30 核查](snowluma-request-incident-20261030.md)修正了当时“无可补审申请”的解释，并记录私有适配器修复及真实补审。重启免登录尚未验收，维护重启后仍须人工核对真实 QQ 身份及在线状态。
 
 ## 管理台与反向代理
 

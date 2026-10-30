@@ -96,6 +96,9 @@ class OneBotTransportTests(unittest.IsolatedAsyncioTestCase):
             await client.call_action("slow")
         self.assertEqual(client.pending_action_count, 0)
         await asyncio.sleep(.12)
+        # Only the first call exercises a short timeout. The healthy echo must
+        # tolerate ordinary scheduler and TCP delays on Windows too.
+        client.action_timeout = 1
         self.assertEqual(await client.call_action("next"), "alive")
 
     async def test_reconnect_and_access_token(self):

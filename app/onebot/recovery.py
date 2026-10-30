@@ -1,15 +1,17 @@
-"""Catch up missed OneBot group-add events after startup or reconnection."""
+"""Catch up missed OneBot group-add events on recovery and periodically."""
 from __future__ import annotations
 
 import asyncio
 import logging
 from collections import Counter
+from time import monotonic
 
 from app.onebot.napcat import MAX_SAFE_INTEGER, _decimal
 from app.onebot.snowluma import unhandled_events as snowluma_unhandled_events
 
 logger = logging.getLogger(__name__)
 REQUEST_LIMIT = 100
+SCAN_INTERVAL = 60
 
 
 def unhandled_events(payload, bot_id):
@@ -37,20 +39,22 @@ def unhandled_events(payload, bot_id):
 
 
 class MissedRequestRecovery:
-    def __init__(self, runtime):
+    def __init__(self, runtime, *, scan_interval=SCAN_INTERVAL, clock=monotonic):
         self.runtime = runtime
+        self.scan_interval = scan_interval
+        self._clock = clock
         self._checked = {}
         self._lock = asyncio.Lock()
 
     async def run_once(self):
-        """Read status every cycle; scan once per healthy transport/login period.
+        """Scan after recovery and periodically even if transport stays healthy.
 
         A WebSocket can remain connected when QQ goes offline. Status failures
         therefore reset the scan marker too. Failed scans retry next cycle.
         """
         async with self._lock:
             clients = list(self.runtime.clients.values())
-            self._checked = {client: generation for client, generation in self._checked.items() if client in clients}
+            self._checked = {client: marker for client, marker in self._checked.items() if client in clients}
             for client in clients:
                 if not client.connected:
                     self._checked.pop(client, None)
@@ -63,13 +67,15 @@ class MissedRequestRecovery:
                             logger.warning("QQ went offline or unhealthy; catch-up will resume when online")
                         self._checked.pop(client, None)
                         continue
-                    if self._checked.get(client) == generation:
-                        continue
+                    previous = self._checked.get(client)
+                    if previous is not None and previous[0] == generation:
+                        if previous[1] is None or self._clock() - previous[1] < self.scan_interval:
+                            continue
                     version = await client.call_action("get_version_info")
                     name = str(version.get("app_name", "")).casefold() if isinstance(version, dict) else ""
                     if name != "snowluma" and "napcat" not in name:
                         logger.warning("Startup request scan requires a verified SnowLuma or NapCat implementation")
-                        self._checked[client] = generation
+                        self._checked[client] = (generation, None)
                         continue
                     login = await client.call_action("get_login_info")
                     bot_id = _decimal(login.get("user_id")) if isinstance(login, dict) else None
@@ -103,7 +109,9 @@ class MissedRequestRecovery:
                             failed = True
                             logger.exception("Missed request review failed; will retry next cycle")
                     if not failed:
-                        self._checked[client] = generation
+                        self._checked[client] = (generation, self._clock())
+                    else:
+                        self._checked.pop(client, None)
                     logger.info("Startup/reconnect request scan: bot=%s unchecked=%s reviewed=%s retry=%s",
                                 bot_id, len(events), processed, failed)
                 except asyncio.CancelledError:

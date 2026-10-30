@@ -38,7 +38,7 @@ WS 接收循环与事件处理分开，审核等待动作回包时接收循环�
 
 当前生产使用 SnowLuma，NapCat 保留为兼容接入和回滚选项。`inspector.py` 根据 `get_version_info` 选择已核对的契约：SnowLuma 使用系统消息数组、`requester_uin` 与完整 `slreq` 标识；NapCat 使用 `join_requests`、`invitor_uin` 与数字标识。两者共享业务服务、SQL 审计和精确申请去重，迁移不重写历史审批结果。未知实现或证据不足继续交人工核验。
 
-`recovery.py` 在健康连接、重连或已观察到的 QQ 离线恢复后扫描明确未处理的申请。它负责补审，QQ 登录及其恢复由外部客户端负责。SnowLuma 官方容器内的 QQ 运行于 Xvfb；noVNC 是登录和排障入口。当前[生产记录](production-acceptance-20261026.md)已确认在线和补扫，重启免登录仍未验收。协议细节与窗口限制见[SnowLuma 接入](snowluma-migration.md)。
+`recovery.py` 在首次健康连接、重连或已观察到的 QQ 离线恢复后扫描明确未处理的申请，持续健康时也在上次成功扫描至少 60 秒后补扫。它负责补审，QQ 登录及其恢复由外部客户端负责。SnowLuma 官方容器内的 QQ 运行于 Xvfb；noVNC 是登录和排障入口。[后续核查](snowluma-request-incident-20261030.md)记录申请转换缺陷修复及真实忽略审核，重启免登录仍未验收。协议细节与窗口限制见[SnowLuma 接入](snowluma-migration.md)。
 
 ## 一致性与进程边界
 

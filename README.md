@@ -5,7 +5,7 @@
 
 通过 B站账号资料审核 QQ 入群申请的独立服务。**V3 默认使用 FastAPI + 独立 OneBot v11 WebSocket，支持 SnowLuma 与 NapCat；当前项目生产接入使用 SnowLuma，默认运行不依赖 NoneBot2。** 审核规则、凭证和配置历史统一保存在 SQLite v4。
 
-本页说明仓库实现。指定实例的在线核验、数据迁移及未验收项见 [2026-10-26 生产验收记录](docs/production-acceptance-20261026.md)。升级前请备份完整 `data/`、实际环境文件和服务配置，见[部署与迁移](docs/deploy-systemd.md)。
+本页说明仓库实现。生产基线见 [2026-10-26 迁移记录](docs/production-acceptance-20261026.md)，后续申请漏收修复及验收边界见 [2026-10-30 核查记录](docs/snowluma-request-incident-20261030.md)。升级前请备份完整 `data/`、实际环境文件和服务配置，见[部署与迁移](docs/deploy-systemd.md)。
 
 [文档目录](docs/README.md) · [架构](docs/architecture.md) · [配置与迁移](docs/configuration.md) · [审核规则](docs/review-requirements.md) · [拒绝反馈](docs/rejection-feedback.md) · [更新日志](CHANGELOG.md)
 
@@ -18,7 +18,7 @@
 - **资料网关**：WBI、共享逐 HTTP 请求限流、短时资料缓存、在途合并、共同关注与受限 UP 视角回退；未知资料不伪装成未关注。
 - **SQL 配置**：首次完整迁移旧有效配置，随后以 SQL 为准；版本 CAS、历史、导入导出和追加式回滚。
 - **可靠审批**：先写 pending 再执行动作，未知只隔离相关 QQ/UID/请求；精确证据对账和管理员确认。
-- **启动补审**：启动、OneBot 重连或 QQ 恢复在线后自检 SnowLuma 未处理入群申请，按当前群规则补审，原申请持久化去重；保留 NapCat 兼容和迁移去重。
+- **申请补审**：启动、OneBot 重连或 QQ 恢复在线后自检 SnowLuma 未处理入群申请，健康运行期间每分钟补扫，按当前群规则审核并持久化去重；保留 NapCat 兼容和迁移去重。
 - **凭证**：手动 Cookie、CookieCloud、管理员扫码登录、原生刷新、指纹与状态监控；会话更新防止并发覆盖。
 - **可选所有权与巡检**：短效挑战/H5、成员复查、提醒/移除及退群绑定策略。启用和真实外部能力限制见[专题说明](docs/ownership-and-patrol.md)。
 - **管理与运维**：群策略、限制名单、审计、绑定、退群、pending、凭证健康、队列和本地日志/磁盘告警。
@@ -81,7 +81,7 @@ uv run --locked --no-dev python bot.py
 
 `GET /healthz` 仅反映进程启动及 OneBot 连接数量，不证明 B站凭证有效或审核动作成功。受支持部署为单进程、一个 Uvicorn worker；不要并行启动多个审核实例。
 
-启动及连接恢复后，后台每 30 秒检查 QQ 在线状态；在线且健康时补扫一次 `get_group_system_msg(count=100)` 返回的未处理申请。根据实现身份解析 SnowLuma 数组或 NapCat 列表，仅处理已启用群；列表窗口有限，详见[审核恢复规则](docs/review-requirements.md#启动与重连补审)。
+后台每 30 秒检查 QQ 在线状态；首次就绪及连接恢复后扫描 `get_group_system_msg(count=100)`，持续健康时也在上次成功扫描至少 60 秒后补扫，防止漏推送。根据实现身份解析 SnowLuma 数组或 NapCat 列表，仅处理已启用群；列表窗口有限，详见[审核恢复规则](docs/review-requirements.md#启动与重连补审)。SnowLuma v2.2.0 原版存在申请转换缺陷，新部署须先按[核查记录](docs/snowluma-request-incident-20261030.md)准备已修复的私有镜像，不能仅凭连接健康验收。
 
 ### 首次业务配置
 

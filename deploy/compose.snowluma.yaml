@@ -1,4 +1,6 @@
 # Optional official SnowLuma companion; do not combine with the NapCat overlay.
+# v2.2.0 needs the private request-type fix; set SNOWLUMA_IMAGE to that image.
+# See docs/snowluma-request-incident-20261030.md before deploying this baseline.
 # docker compose --env-file .env.prod -f compose.yaml -f deploy/compose.snowluma.yaml up -d --build
 services:
   gatekeeper:
